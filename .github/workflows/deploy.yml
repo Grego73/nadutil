@@ -1,0 +1,24 @@
+name: Deploiement Automatique Alwaysdata
+
+on:
+  push:
+    branches:
+      - main  # Se déclenche dès que vous mettez du code sur la branche principale
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Recuperer le code du dépôt GitHub
+      uses: actions/checkout@v4
+
+    - name: Deployer les fichiers sur le serveur Alwaysdata via SFTP
+      uses: SamKirkland/FTP-Deploy-Action@v4.3.5
+      with:
+        server: ${{ secrets.ALWAYSDATA_HOST }}
+        username: ${{ secrets.ALWAYSDATA_USER }}
+        password: ${{ secrets.ALWAYSDATA_PASSWORD }}
+        protocol: sftp
+        port: 22
+        local-dir: ./
+        server-dir: /home/${{ secrets.ALWAYSDATA_USER }}/www/
