@@ -3,7 +3,7 @@ name: Deploiement Automatique Alwaysdata
 on:
   push:
     branches:
-      - main  # Se déclenche dès que vous mettez du code sur la branche principale
+      - main
 
 jobs:
   deploy:
@@ -21,4 +21,4 @@ jobs:
         protocol: sftp
         port: 22
         local-dir: ./
-        server-dir: /home/${{ secrets.ALWAYSDATA_USER }}/www/
+        server-dir: /home/nadutil/www/
