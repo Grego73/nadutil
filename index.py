@@ -1,46 +1,31 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-import mysql.connector
 import sys
+import os
 
-# Forcer l'affichage en HTML pour le navigateur web
-print("Content-Type: text/html; charset=utf-8\n")
+# Forcer l'affichage en HTML pour le navigateur
+print("Content-Type: text/html; charset=utf-8")
+print()
 
-# Configuration de votre base MySQL Alwaysdata
-config = {
-    'host': 'mysql-nadutil.alwaysdata.net',
-    'user': 'nadutil',
-    'password': 'Nadou73', # Votre mot de passe de connexion
-    'database': 'nadutil_db'
-}
-
-print("<html><head><title>Suivi Cantine - Nadutil</title></head><body>")
-print("<h1>Bienvenue sur Nadutil - Gestion de la Cantine</h1>")
-
-try:
-    # Connexion à la base de données
-    connexion = mysql.connector.connect(**config)
-    cursor = connexion.cursor()
-    
-    # Création automatique d'une table d'exemple pour tester
-    cursor.execute("""
-    CREATE TABLE IF NOT EXISTS eleves (
-        id INT AUTO_INCREMENT PRIMARY KEY,
-        classe VARCHAR(50),
-        nom VARCHAR(100),
-        prenom VARCHAR(100),
-        regime VARCHAR(10)
-    );
-    """)
-    
-    print("<p style='color: green;'>🟢 Connexion réussie à la base MySQL Alwaysdata !</p>")
-    print("<p>La table 'eleves' est prête à recevoir les données.</p>")
-    
-    cursor.close()
-    connexion.close()
-
-except mysql.connector.Error as err:
-    print(f"<p style='color: red;'>🔴 Erreur de connexion : {err}</p>")
-
-print("</body></html>")
+print("""
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>Suivi Cantine - Nadutil</title>
+    <style>
+        body { font-family: Arial, sans-serif; background-color: #f4f6f9; color: #2c3e50; text-align: center; padding: 50px; }
+        .card { background: white; padding: 30px; border-radius: 8px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); display: inline-block; max-width: 600px; }
+        h1 { color: #e85693; }
+    </style>
+</head>
+<body>
+    <div class="card">
+        <h1>Bienvenue sur Nadutil</h1>
+        <h3>Gestion de la Restauration Scolaire</h3>
+        <p style='color: green;'>🟢 Le serveur Python CGI fonctionne parfaitement !</p>
+    </div>
+</body>
+</html>
+""")
