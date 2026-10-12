@@ -12,12 +12,23 @@ jobs:
     - name: Recuperer le code du dépôt GitHub
       uses: actions/checkout@v4
 
-    - name: Transférer les fichiers via SFTP (SSH)
-      uses: appleboy/scp-action@v0.1.7
+    - name: Deployer les fichiers sur le serveur Alwaysdata via FTPS
+      uses: SamKirkland/FTP-Deploy-Action@v4.3.5
+      with:
+        server: ${{ secrets.ALWAYSDATA_HOST }}
+        username: ${{ secrets.ALWAYSDATA_USER }}
+        password: ${{ secrets.ALWAYSDATA_PASSWORD }}
+        protocol: ftps
+        port: 21
+        local-dir: ./
+        server-dir: /www/
+
+    - name: Executer l'installation des dependances Python via SSH
+      uses: appleboy/ssh-action@v1.0.3
       with:
         host: ${{ secrets.ALWAYSDATA_HOST }}
         username: ${{ secrets.ALWAYSDATA_USER }}
         password: ${{ secrets.ALWAYSDATA_PASSWORD }}
         port: 22
-        source: "./*"
-        target: "/home/nadutil/www/"
+        script: |
+          pip install --user --upgrade mysql-connector-python
