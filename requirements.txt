@@ -1,7 +1,3 @@
 streamlit
+google-genai
 firebase-admin
-pandas
-openpyxl
-pytesseract
-Pillow
-python-docx
