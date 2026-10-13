@@ -1,5 +1,5 @@
 import streamlit as st
-from google import genai  # Nouvelle méthode d'importation officielle de Google
+from google import genai
 import firebase_admin
 from firebase_admin import credentials, firestore
 import json
@@ -8,18 +8,28 @@ import json
 # 1. CONFIGURATION DES APIS & CONFIG
 # ==========================================
 
-# Configuration Gemini avec la nouvelle bibliothèque officielle
+# Configuration Gemini
 GOOGLE_API_KEY = st.secrets["GOOGLE_API_KEY"]
 client = genai.Client(api_key=GOOGLE_API_KEY)
 
-# Initialisation Firebase (Évite les double-initialisations sur Streamlit)
+# Initialisation Firebase reconstruite dynamiquement
 if not firebase_admin._apps:
-    # Récupération des identifiants Firebase depuis les Secrets Streamlit
-    firebase_creds = json.loads(st.secrets["FIREBASE_SERVICE_ACCOUNT"])
+    firebase_creds = {
+        "type": "service_account",
+        "project_id": st.secrets["FIREBASE_PROJECT_ID"],
+        "private_key": st.secrets["FIREBASE_PRIVATE_KEY"],
+        "client_email": st.secrets["FIREBASE_CLIENT_EMAIL"]
+    }
+    
     cred = credentials.Certificate(firebase_creds)
     firebase_admin.initialize_app(cred)
 
 db = firestore.client()
+
+# ==========================================
+# LE RESTE DU CODE (INTERFACE & BOUTONS) RESTE LE MÊME...
+# ==========================================
+
 
 # ==========================================
 # 2. INTERFACE UTILISATEUR (STREAMLIT)
