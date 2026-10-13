@@ -72,12 +72,12 @@ if uploaded_file is not None:
                   }
                 }
                 """
-                # Appel mis à jour avec le tout dernier modèle officiel gemini-3.8-flash
+                # Utilisation du modèle 2.0 en alternative pour contourner la surcharge du serveur
                 response = client.models.generate_content(
-                    model="gemini-3.8-flash",  # <--- Le changement est ici !
+                    model="gemini-2.0-flash",  # <--- Changez la version ici
                     contents=[prompt, image]
                 )
-                
+
                 # Convertir la réponse texte en dictionnaire Python
                 donnees_extraites = json.loads(response.text.strip())
                 st.session_state['donnees_repas'] = donnees_extraites
