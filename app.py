@@ -72,11 +72,9 @@ if uploaded_file is not None:
                   }
                 }
                 """
-                
-                # Appel corrigé : On envoie directement l'objet 'image' PIL
-                # La nouvelle bibliothèque google-genai l'analyse automatiquement.
+                # Appel mis à jour avec le tout dernier modèle officiel gemini-3.8-flash
                 response = client.models.generate_content(
-                    model="gemini-2.5-flash",
+                    model="gemini-3.8-flash",  # <--- Le changement est ici !
                     contents=[prompt, image]
                 )
                 
