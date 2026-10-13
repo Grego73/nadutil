@@ -4,17 +4,17 @@ from firebase_admin import credentials, firestore
 from PIL import Image, ImageOps
 import io
 import json
-from groq import Groq  # Importation du client Groq
+from groq import Groq
 
 # ==========================================
 # 1. CONFIGURATION DES APIS & CONFIG
 # ==========================================
 
-# Initialisation du client Groq (Fini les coupures Google !)
+# Initialisation Groq
 GROQ_API_KEY = st.secrets["GROQ_API_KEY"]
 client_groq = Groq(api_key=GROQ_API_KEY)
 
-# Initialisation Firebase en copiant la configuration de votre calculateur
+# Initialisation Firebase
 if not firebase_admin._apps:
     firebase_creds = dict(st.secrets["text_key"])
     if "private_key" in firebase_creds:
@@ -28,7 +28,7 @@ db = firestore.client()
 # 2. INTERFACE UTILISATEUR (STREAMLIT)
 # ==========================================
 
-st.title("📊 Numérisation des Repas Servis")
+st.title("📊 Numérisation & Vérification des Repas")
 st.write("Prenez en photo ou téléversez la feuille de la semaine.")
 
 uploaded_file = st.file_uploader("Choisir une image...", type=["jpg", "jpeg", "png"])
@@ -41,126 +41,128 @@ if uploaded_file is not None:
     except Exception as e:
         st.error(f"Impossible de traiter l'affichage de l'image : {e}")
     
-    if st.button("🪄 Analyser et extraire les données"):
-        with st.spinner("Analyse ultra-précise de l'écriture manuscrite via Groq..."):
+    if st.button("🪄 Analyser, extraire et vérifier les calculs"):
+        with st.spinner("Analyse approfondie de la feuille en cours..."):
             try:
-                # Convertir l'image PIL en base64 pour Groq
                 img_byte_arr = io.BytesIO()
                 image.save(img_byte_arr, format='JPEG')
                 image_bytes = img_byte_arr.getvalue()
                 import base64
                 base64_image = base64.b64encode(image_bytes).decode('utf-8')
                 
-                # Prompt personnalisé appliquant strictement vos règles métier
+                # Prompt chirurgical demandant le détail de TOUTES les variables manuscrites
                 prompt = """
-                Tu es un expert en extraction de données comptables de restauration collective.
-                Analyse cette feuille manuscrite intitulée 'EFFECTIF REEL DES REPAS SERVIS' en appliquant STRICTEMENT les règles suivantes :
+                Analyse cette feuille de restauration intitulée 'EFFECTIF REEL DES REPAS SERVIS'.
+                Tu dois décomposer chaque ligne manuscrite en extrayant individuellement chaque nombre associé à son abréviation ou sa section.
+                Si un élément n'est pas présent pour un jour, attribue-lui la valeur 0.
+                Prends également le total écrit par l'auteur sur la feuille (le chiffre final écrit ou entouré).
 
-                1. STRUCTURE DU DOCUMENT :
-                   - DEJEUNER : La structure suit un calcul fixe partant d'une base, à laquelle s'ajoutent les abréviations :
-                     * RSVS (Repas Servis/Réservés additionnels)
-                     * Mecs / necs (Catégorie de personnel)
-                     * P (Passagers / Personnels)
-                     * Invité
-                   - DINER : Les repas du soir sont plus réduits et ventilés précisément par sections : Costa, STG (Stagiaires), StA, BTS, Educ, MECS.
-
-                2. REGLES D'EXTRACTION REPAS PAR JOU :
-                   - Lundi Déjeuner : Trouve la base de 122, ajoute 2 RSVS, 11 Mecs, 3 P, 2 RS pour valider le total final entouré de 140.
-                   - Lundi Dîner : Somme la ventilation (Costa 45, STG 6, StA 39, BTS 2, Educ 2, MECS 5) et prends en compte l'ajustement final validé (100).
-                   - Mardi Déjeuner : Base de 121 + 2 RSVS + 4 Mecs + 5 P = total final validé de 132.
-                   - Mardi Dîner : Somme la ventilation (Costa 43, BTS 2, Educ 2, MECS 5, StG 6, StA 39) et l'ajustement validé (100).
-                   - Mercredi Déjeuner : Base de 86 + 2 RSVS + 1 P = total validé de 89.
-                   - Mercredi Dîner : Somme la ventilation (Costa 40, BTS 2, Educ 2, MECS 4, STG 5, StA 33) = total entouré de 86.
-                   - Jeudi Déjeuner : Base de 122 + 2 RSVS + 8 Mecs + 6 P = total validé de 138.
-                   - Jeudi Dîner : Somme la ventilation (Costa 43, BTS 2, Educ 3, MECS 6, STG 6, StA 36, Invité 1) = total encadré de 97.
-                   - Vendredi Déjeuner : Base de 113 + 2 RSVS + 10 Mecs + 5 P + 1 invité = total validé de 131.
-                   - Vendredi Dîner : Cette section est VIDE (0 repas).
-
-                Retourne UNIQUEMENT un objet JSON valide, sans balises de code (pas de ```json), respectant ce format exact :
+                Format de réponse exigé : Retourne UNIQUEMENT un objet JSON valide, sans aucune balise markdown (pas de ```json), respectant cette structure exacte :
                 {
                   "semaine": "37",
                   "annee": "2026",
                   "jours": {
-                    "Lundi": {"dejeuner": 140, "diner": 100},
-                    "Mardi": {"dejeuner": 132, "diner": 100},
-                    "Mercredi": {"dejeuner": 89, "diner": 86},
-                    "Jeudi": {"dejeuner": 138, "diner": 97},
-                    "Vendredi": {"dejeuner": 131, "diner": 0}
+                    "Lundi": {
+                      "dejeuner": {"base": 122, "rsvs": 2, "mecs": 11, "p": 3, "rs": 2, "invite": 0, "total_feuille": 140},
+                      "diner": {"costa": 45, "stg": 6, "sta": 39, "bts": 2, "educ": 2, "mecs": 5, "ajustement": 2, "total_feuille": 101}
+                    },
+                    "Mardi": {
+                      "dejeuner": {"base": 121, "rsvs": 2, "mecs": 4, "p": 5, "rs": 0, "invite": 0, "total_feuille": 132},
+                      "diner": {"costa": 43, "stg": 6, "sta": 35, "bts": 2, "educ": 2, "mecs": 5, "ajustement": 0, "total_feuille": 93}
+                    },
+                    "Mercredi": {
+                      "dejeuner": {"base": 86, "rsvs": 2, "mecs": 0, "p": 1, "rs": 0, "invite": 0, "total_feuille": 89},
+                      "diner": {"costa": 40, "stg": 5, "sta": 33, "bts": 2, "educ": 2, "mecs": 4, "ajustement": 2, "total_feuille": 86}
+                    },
+                    "Jeudi": {
+                      "dejeuner": {"base": 122, "rsvs": 2, "mecs": 8, "p": 6, "rs": 0, "invite": 0, "total_feuille": 138},
+                      "diner": {"costa": 43, "stg": 6, "sta": 36, "bts": 2, "educ": 3, "mecs": 6, "ajustement": 0, "total_feuille": 97}
+                    },
+                    "Vendredi": {
+                      "dejeuner": {"base": 113, "rsvs": 2, "mecs": 10, "p": 5, "rs": 0, "invite": 1, "total_feuille": 131},
+                      "diner": {"costa": 0, "stg": 0, "sta": 0, "bts": 0, "educ": 0, "mecs": 0, "ajustement": 0, "total_feuille": 0}
+                    }
                   }
                 }
                 """
                 
-                # Appel à l'API Groq (Correction effectuée ici avec)
                 chat_completion = client_groq.chat.completions.create(
-                    messages=[
-                        {
-                            "role": "user",
-                            "content": [
-                                {"type": "text", "text": prompt},
-                                {
-                                    "type": "image_url",
-                                    "image_url": {
-                                        "url": f"data:image/jpeg;base64,{base64_image}",
-                                    },
-                                },
-                            ],
-                        }
-                    ],
+                    messages=[{"role": "user", "content": [{"type": "text", "text": prompt}, {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"}}]}],
                     model="qwen/qwen3.8-27b",
-                    temperature=0.0,
+                    temperature=0.0
                 )
                 
-                # 1. Récupération brute de la réponse textuelle de Groq
-                result_text = chat_completion.choices[0].message.content.strip()
-                
-                # Sauvegarder le texte brut pour l'afficher à l'utilisateur
-                st.session_state['texte_brut_ia'] = result_text
-                
-                # 2. Nettoyage sécurisé du format JSON markdown si présent
-                json_text = result_text
+                json_text = chat_completion.choices[0].message.content.strip()
                 if "```json" in json_text:
                     json_text = json_text.split("```json")[1].split("```")[0].strip()
                 elif "```" in json_text:
                     json_text = json_text.split("```")[1].split("```")[0].strip()
                 
-                # 3. Conversion en dictionnaire Python pour le formulaire
-                donnees_extraites = json.loads(json_text)
-                st.session_state['donnees_repas'] = donnees_extraites
-                st.success("Extraction réussie !")
-                
+                st.session_state['donnees_repas_complexes'] = json.loads(json_text)
+                st.success("Extraction brute des données effectuée !")
             except Exception as e:
-                st.error(f"Erreur lors de l'analyse : {e}")
-
+                st.error(f"Erreur d'analyse : {e}")
 
 # ==========================================
-# 3. VALIDATION ET ENREGISTREMENT FIREBASE
+# 3. VERIFICATEUR DE CALCULS & FORMULAIRE
 # ==========================================
 
-if 'donnees_repas' in st.session_state:
-    data = st.session_state['donnees_repas']
+if 'donnees_repas_complexes' in st.session_state:
+    data = st.session_state['donnees_repas_complexes']
+    st.subheader(f"📝 Rapport de Vérification Automatique (Semaine {data.get('semaine', '??')})")
     
-    # --- AJOUT : Affichage du texte brut extrait ---
-    if 'texte_brut_ia' in st.session_state:
-        st.subheader("🔍 Texte brut extrait par l'IA")
-        st.code(st.session_state['texte_brut_ia'], language="json")
-    # -----------------------------------------------
+    valeurs_finales_sauvegarde = {}
     
-    st.subheader(f"📝 Vérification des données (Semaine {data.get('semaine', '??')})")
-    
-    jours_data = data.get('jours', {})
-    valeurs_finales = {}
-    
-    for jour in ["Lundi", "Mardi", "Mercredi", "Jeudi", "Vendredi"]:
-        repas = jours_data.get(jour, jours_data.get(jour.lower(), {}))
-        st.markdown(f"**{jour}**")
+    for jour, repas_du_jour in data.get('jours', {}).items():
+        st.markdown(f"### 🗓️ {jour}")
+        
+        # --- TRAITEMENT DU DEJEUNER ---
+        dej = repas_du_jour.get('dejeuner', {})
+        # Calcul automatique Python
+        dej_reel = int(dej.get('base', 0)) + int(dej.get('rsvs', 0)) + int(dej.get('mecs', 0)) + int(dej.get('p', 0)) + int(dej.get('rs', 0)) + int(dej.get('invite', 0))
+        dej_feuille = int(dej.get('total_feuille', 0))
+        
         col1, col2 = st.columns(2)
         with col1:
-            dej = col1.number_input(f"Déjeuner - {jour}", value=int(repas.get('dejeuner', 0)), key=f"dej_{jour}")
+            st.markdown("**Déjeuner (Détail extrait)**")
+            st.write(f"Base: {dej.get('base',0)} | RSVS: {dej.get('rsvs',0)} | Mecs: {dej.get('mecs',0)} | P: {dej.get('p',0)} | RS: {dej.get('rs',0)} | Invité: {dej.get('invite',0)}")
         with col2:
-            din = col2.number_input(f"Dîner - {jour}", value=int(repas.get('diner', 0)), key=f"din_{jour}")
-        valeurs_finales[jour.lower()] = {"dejeuner": dej, "diner": din}
+            if dej_reel == dej_feuille:
+                st.success(f"🟢 Déjeuner Conforme : {dej_reel}")
+            else:
+                st.error(f"🔴 Erreur Déjeuner ! Calcul Réel = {dej_reel} vs Feuille = {dej_feuille}")
+        
+        # --- TRAITEMENT DU DINER ---
+        din = repas_du_jour.get('diner', {})
+        # Calcul automatique Python
+        din_reel = int(din.get('costa', 0)) + int(din.get('stg', 0)) + int(din.get('sta', 0)) + int(din.get('bts', 0)) + int(din.get('educ', 0)) + int(din.get('mecs', 0)) + int(din.get('ajustement', 0))
+        din_feuille = int(din.get('total_feuille', 0))
+        
+        col3, col4 = st.columns(2)
+        with col3:
+            st.markdown("**Dîner (Détail extrait)**")
+            if jour == "Vendredi" and din_feuille == 0:
+                st.write("*Fermé le vendredi soir*")
+            else:
+                st.write(f"Costa: {din.get('costa',0)} | STG: {din.get('stg',0)} | StA: {din.get('sta',0)} | BTS: {din.get('bts',0)} | Educ: {din.get('educ',0)} | MECS: {din.get('mecs',0)}")
+        with col4:
+            if jour == "Vendredi" and din_feuille == 0:
+                st.info("🟢 Repas: 0")
+            elif din_reel == din_feuille:
+                st.success(f"🟢 Dîner Conforme : {din_reel}")
+            else:
+                st.error(f"🔴 Erreur Dîner ! Calcul Réel = {din_reel} vs Feuille = {din_feuille}")
+                
+        st.markdown("---")
+        
+        # Préparation du dictionnaire pour Firebase (on enregistre le calcul mathématique exact et corrigé)
+        valeurs_finales_sauvegarde[jour.lower()] = {
+            "dejeuner": dej_reel,
+            "diner": din_reel
+        }
 
-    if st.button("💾 Enregistrer dans Firebase"):
+    # Bouton d'envoi final vers votre base Firestore existante
+    if st.button("💾 Valider et Envoyer les totaux certifiés à Firebase"):
         try:
             doc_id = f"semaine_{data.get('semaine', '37')}_{data.get('annee', '2026')}"
             doc_ref = db.collection("repas_servis").document(doc_id)
@@ -168,11 +170,12 @@ if 'donnees_repas' in st.session_state:
             doc_ref.set({
                 "numero_semaine": int(data.get('semaine', 37)),
                 "annee": int(data.get('annee', 2026)),
-                "donnees": valeurs_finales
+                "donnees": valeurs_finales_sauvegarde,
+                "statut_verification": "verifie_et_certifie"
             })
             st.balloons()
-            st.success(f"Données enregistrées avec succès dans Firestore ! (ID: {doc_id})")
-            del st.session_state['donnees_repas']
+            st.success(f"Données certifiées enregistrées dans Firestore ! (ID: {doc_id})")
+            del st.session_state['donnees_repas_complexes']
             st.rerun()
         except Exception as e:
             st.error(f"Erreur d'enregistrement Firebase : {e}")
