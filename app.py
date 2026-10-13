@@ -7,26 +7,19 @@ from firebase_admin import credentials, firestore
 # 1. CONFIGURATION DES APIS & CONFIG
 # ==========================================
 
+# Configuration Gemini
 GOOGLE_API_KEY = st.secrets["GOOGLE_API_KEY"]
 client = genai.Client(api_key=GOOGLE_API_KEY)
 
-# Initialisation Firebase sécurisée
+# Initialisation Firebase en copiant la configuration du calculateur
 if not firebase_admin._apps:
-    project_id = st.secrets["FIREBASE_PROJECT_ID"].strip()
+    # Récupérer directement le dictionnaire généré par Streamlit sous [text_key]
+    firebase_creds = dict(st.secrets["text_key"])
     
-    # Restituer les vrais sauts de ligne pour la clé Google
-    clean_key = st.secrets["FIREBASE_PRIVATE_KEY"].strip().replace("\\n", "\n")
-    
-    # Reconstruction de l'adresse e-mail technique officielle Firebase
-    official_email = f"firebase-adminsdk-fbsvc@{project_id}.iam.gserviceaccount.com"
-
-    firebase_creds = {
-        "type": "service_account",
-        "project_id": project_id,
-        "private_key": clean_key,
-        "client_email": official_email
-    }
-    
+    # Correction automatique des sauts de ligne de la clé privée si nécessaire
+    if "private_key" in firebase_creds:
+        firebase_creds["private_key"] = firebase_creds["private_key"].replace("\\n", "\n")
+        
     cred = credentials.Certificate(firebase_creds)
     firebase_admin.initialize_app(cred)
 
