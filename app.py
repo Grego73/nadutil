@@ -9,16 +9,16 @@ import re
 from docx import Document
 from docx.shared import Pt, Inches
 from docx.enum.text import WD_ALIGN_PARAGRAPH
-from docx.enum.table import WD_TABLE_ALIGNMENT, WD_ALIGN_VERTICAL
-from docx.oxml import OxmlElement, parse_xml
-from docx.oxml.ns import nsdecls, qn
+from docx.enum.table import WD_TABLE_ALIGNMENT
+from docx.oxml import parse_xml
+from docx.oxml.ns import nsdecls
 
 # 1. CONFIGURATION DE L'INTERFACE
-st.set_page_config(page_title="Nadutil - Facturation Word", page_icon="📊", layout="wide")
+st.set_page_config(page_title="Nadutil - Facturation Détaillée", page_icon="📝", layout="wide")
 st.title("📊 Application Autonome Nadutil")
-st.subheader("Génération du Réel pour Facturation au format Word")
+st.subheader("Génération Avancée du Réel pour Facturation au format Word (Avec Détails)")
 
-# 2. INITIALISATION FIREBASE
+# 2. INITIALISATION SECURISEE DE FIREBASE
 if not firebase_admin._apps:
     try:
         firebase_secrets = dict(st.secrets["firebase"])
@@ -29,16 +29,11 @@ if not firebase_admin._apps:
 
 db = firestore.client() if firebase_admin._apps else None
 
-# Valeurs par défaut initiales
-valeurs = {
-    "lundi_midi": 140, "mardi_midi": 135, "mercredi_midi": 105, "jeudi_midi": 140, "vendredi_midi": 131,
-    "lundi_soir": 99, "mardi_soir": 100, "mercredi_soir": 86, "jeudi_soir": 197, "vendredi_soir": 0
-}
-
 # 3. APPAREIL PHOTO ET LECTURE AUTOMATIQUE
-st.write("### 📸 1. Importez la photo de votre feuille manuscrite")
-fichier_image = st.file_uploader("Glissez la photo de la feuille ici :", type=["png", "jpg", "jpeg"])
+st.write("### 📸 1. Importez la photo de votre feuille manuscrite pour analyse")
+fichier_image = st.file_uploader("Glissez la photo de la feuille ici (PNG, JPG, JPEG) :", type=["png", "jpg", "jpeg"])
 
+texte_lu = ""
 if fichier_image is not None:
     image_brute = Image.open(fichier_image)
     try:
@@ -46,117 +41,180 @@ if fichier_image is not None:
     except Exception:
         image = image_brute
         
-    st.image(image, caption="Feuille détectée", width=300)
+    st.image(image, caption="Feuille détectée par l'application", width=300)
     
-    with st.spinner("🧠 Analyse et lecture des totaux entourés..."):
+    with st.spinner("🧠 Analyse optique et extraction des données en cours..."):
         try:
             texte_lu = pytesseract.image_to_string(image, lang='fra')
-            # Extraction des blocs de nombres à 2 ou 3 chiffres
-            chiffres = [int(s) for s in re.findall(r'\b\d{2,3}\b', texte_lu)]
-            if len(chiffres) >= 5:
-                st.success("🟢 Chiffres détectés avec succès ! Modifiez-les ci-dessous si nécessaire.")
-        except Exception:
-            st.warning("⚠️ Lecture automatique difficile. Vous pouvez saisir les chiffres manuellement ci-dessous.")
+            st.success("🟢 L'IA a fini d'analyser l'image. Utilisez les formulaires ci-dessous pour valider les blocs.")
+        except Exception as e:
+            st.error(f"🔴 Erreur de lecture de l'image : {e}")
 
 st.write("---")
 
-# 4. COMPTEURS DE VÉRIFICATION
-st.write("### 📅 2. Vérifiez ou ajustez les totaux détectés avant de créer le Word")
-num_semaine = st.text_input("Numéro de la semaine (ex: 37) :", value="37")
+# 4. FORMULAIRES DE CONFIGURATION ULTRA-DÉTAILLÉS JOUR PAR JOUR
+st.write("### 📅 2. Complétez ou ajustez les totaux et les détails des calculs")
 
-col1, col2 = st.columns(2)
-with col1:
-    st.markdown("**🍽️ REPAS DU MIDI (Déjeuner)**")
-    l1 = st.number_input("LUNDI - Midi :", min_value=0, value=valeurs["lundi_midi"])
-    m1 = st.number_input("MARDI - Midi :", min_value=0, value=valeurs["mardi_midi"])
-    me1 = st.number_input("MERCREDI - Midi :", min_value=0, value=valeurs["mercredi_midi"])
-    j1 = st.number_input("JEUDI - Midi :", min_value=0, value=valeurs["jeudi_midi"])
-    v1 = st.number_input("VENDREDI - Midi :", min_value=0, value=valeurs["vendredi_midi"])
+num_semaine = st.text_input("Numéro de la semaine pour l'en-tête (ex: 26 ou 37) :", value="26")
+dates_semaine = st.text_input("Dates de la semaine (ex: Du 22 au 26 juin 2026) :", value="Du 22 au 26 juin 2026")
 
-with col2:
-    st.markdown("**🌙 REPAS DU SOIR (Dîner)**")
-    l2 = st.number_input("LUNDI - Soir :", min_value=0, value=valeurs["lundi_soir"])
-    m2 = st.number_input("MARDI - Soir :", min_value=0, value=valeurs["mardi_soir"])
-    me2 = st.number_input("MERCREDI - Soir :", min_value=0, value=valeurs["mercredi_soir"])
-    j2 = st.number_input("JEUDI - Soir :", min_value=0, value=valeurs["jeudi_soir"])
-    v2 = st.number_input("VENDREDI - Soir :", min_value=0, value=valeurs["vendredi_soir"])
+# Initialisation des structures de données pour stocker les détails saisis
+jours = ["LUNDI", "MARDI", "MERCREDI", "JEUDI", "VENDREDI"]
+data_midi_totaux = {}
+data_midi_details = {}
+data_soir_totaux = {}
+data_soir_details = {}
+data_pdej_totaux = {}
+data_pdej_details = {}
 
-# 5. BOUTON DE GÉNÉRATION DU FICHIER WORD
-if st.button("📄 GÉNÉRER LE FICHIER WORD (.DOCX)"):
+# Création d'onglets pour chaque jour pour une navigation claire et lisible
+onglets = st.tabs(jours)
+
+for i, jour in enumerate(jours):
+    with onglets[i]:
+        st.markdown(f"### 🗓️ Configuration du {jour}")
+        
+        c1, c2, c3 = st.columns(3)
+        
+        with c1:
+            st.markdown("**☕ PETIT DÉJEUNER**")
+            val_pdej = 0 if jour == "LUNDI" else (15 if jour == "MARDI" else (12 if jour == "MERCREDI" else (22 if jour == "JEUDI" else 13)))
+            det_pdej = "" if jour == "LUNDI" else (f"13 + 2 RSVS" if jour in ["MARDI", "VENDREDI"] else (f"10 + 2 RSVS" if jour == "MERCREDI" else "11 + 2 RSVS + 9 Salesiens"))
+            
+            data_pdej_totaux[jour] = st.number_input(f"Total P.Dej {jour} :", min_value=0, value=val_pdej, key=f"pdej_val_{jour}")
+            data_pdej_details[jour] = st.text_input(f"Détail P.Dej {jour} (Parenthèses) :", value=det_pdej, key=f"pdej_det_{jour}")
+            
+        with c2:
+            st.markdown("**🍽️ REPAS DU MIDI (Déjeuner)**")
+            val_midi = 55 if jour != "VENDREDI" else 54
+            det_midi = "37 + 1 RSVS + 10 MECS + 2P + 2 inv lycee + 3 RSM" if jour == "LUNDI" else \
+                       ("33 + 3 RSVS + 5 MECS + 2P + 12 inv lycee" if jour == "MARDI" else \
+                       ("30 + 2 RSVS + 9 Salesiens + 12 inv lycee + 2 RS (XDR/ChM)" if jour == "MERCREDI" else \
+                       ("33 + 2 RSVS + 8 MECS + 3P + 9 Salesiens" if jour == "JEUDI" else "38 + 2 RSVS + 2P + 9 Salesiens + 3 RSM")))
+                       
+            data_midi_totaux[jour] = st.number_input(f"Total Midi {jour} :", min_value=0, value=val_midi, key=f"midi_val_{jour}")
+            data_midi_details[jour] = st.text_input(f"Détail Midi {jour} (Parenthèses) :", value=det_midi, key=f"midi_det_{jour}")
+            
+        with c3:
+            st.markdown("**🌙 REPAS DU SOIR (Dîner)**")
+            val_soir = 15 if jour == "LUNDI" else (12 if jour == "MARDI" else (22 if jour in ["MERCREDI", "JEUDI"] else 0))
+            det_soir = "13 + 2 RSVS" if jour == "LUNDI" else \
+                       ("12 (10 + 2 RSVS)" if jour == "MARDI" else \
+                       ("11 + 2RSVS + 9 Salesiens" if jour == "MERCREDI" else \
+                       ("11 + 2 RSVS + 9 Salesiens" if jour == "JEUDI" else "")))
+                       
+            data_soir_totaux[jour] = st.number_input(f"Total Soir {jour} :", min_value=0, value=val_soir, key=f"soir_val_{jour}")
+            data_soir_details[jour] = st.text_input(f"Détail Soir {jour} (Parenthèses) :", value=det_soir, key=f"soir_det_{jour}")
+
+st.write("---")
+total_mecs_input = st.number_input("Total cumulé MECS de la semaine (affiché en pied de page) :", min_value=0, value=23)
+
+# 5. LOGIQUE DE CRÉATION DU DOCUMENT WORD DÉTAILLÉ
+if st.button("📄 GÉNÉRER LE DOCUMENT WORD COMPLET (.DOCX)"):
     
-    # Préparation des données propres
-    lignes_repas = [
-        ["LUNDI", "0", str(l1), "12", str(l2)],
-        ["MARDI", "X", str(m1), "12", str(m2)],
-        ["MERCREDI", "X", str(me1), "12", str(me2)],
-        ["JEUDI", "X", str(j1), "12", str(j2)],
-        ["VENDREDI", "X", str(v1), "", str(v2) if v2 > 0 else ""],
-    ]
-    
-    # Création du document Word structuré
     doc = Document()
     
-    # Titre Principal h1
+    # 1. En-tête principal stylisé h1
     p_titre = doc.add_paragraph()
     p_titre.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    run_titre = p_titre.add_run(f"REEL POUR FACTURATION SEMAINE {num_semaine}")
+    run_titre = p_titre.add_run(f"REEL POUR FACTURATION SEMAINE {num_semaine}\n")
     run_titre.font.name = 'Arial'
     run_titre.font.size = Pt(14)
     run_titre.font.bold = True
-    run_titre.font.color.rgb = openpyxl.styles.colors.Color("1F4E78")
     
-    # Sous-titre h2
-    p_sub = doc.add_paragraph()
-    p_sub.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    run_sub = p_sub.add_run("Suivi Réel des Repas Servis - Lycée Costa de Beauregard")
-    run_sub.font.name = 'Arial'
-    run_sub.font.size = Pt(11)
-    run_sub.font.italic = True
+    # Dates de la semaine h2
+    p_dates = doc.add_paragraph()
+    p_dates.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    run_dates = p_dates.add_run(f"{dates_semaine}")
+    run_dates.font.name = 'Arial'
+    run_dates.font.size = Pt(11)
+    run_dates.font.italic = True
     
-    # Construction du tableau Word (6 lignes, 5 colonnes)
+    # 2. Construction du Tableau principal (6 lignes, 5 colonnes)
     table = doc.add_table(rows=1, cols=5)
     table.alignment = WD_TABLE_ALIGNMENT.CENTER
     
-    # En-têtes de colonnes
+    # Création des en-têtes de colonnes
     hdr_cells = table.rows[0].cells
-    headers = ["JOUR", "PETIT DEJEUNER", "MIDI", "GOUTER", "SOIR"]
+    headers = ["", "PETIT DEJEUNER", "MIDI", "GOUTER", "SOIR"]
     for i, title in enumerate(headers):
         hdr_cells[i].text = title
         hdr_cells[i].paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
-        # Appliquer une couleur de fond bleu clair aux en-têtes
+        hdr_cells[i].paragraphs[0].runs[0].font.bold = True
+        hdr_cells[i].paragraphs[0].runs[0].font.name = 'Arial'
+        hdr_cells[i].paragraphs[0].runs[0].font.size = Pt(10)
+        # Application d'un fond bleu clair pastel sur les cellules d'en-tête
         shading = parse_xml(r'<w:shd {} w:fill="D9E1F2"/>'.format(nsdecls('w')))
         hdr_cells[i]._tc.get_or_add_tcPr().append(shading)
         
-    # Remplissage du tableau avec les totaux validés
-    for row_data in lignes_repas:
+    # 3. Remplissage intelligent des lignes du lundi au vendredi
+    for jour in jours:
         row_cells = table.add_row().cells
-        for idx, text in enumerate(row_data):
-            row_cells[idx].text = text
-            row_cells[idx].paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
-            
-    # Ligne de pied de tableau pour le total MECS
+        
+        # Colonne 1 : Jour
+        row_cells[0].text = jour
+        
+        # Colonne 2 : Petit Déjeuner (Formate la valeur + son détail s'il existe)
+        pdej_txt = f"{data_pdej_totaux[jour]}"
+        if data_pdej_details[jour].strip():
+            pdej_txt += f" ({data_pdej_details[jour].strip()})"
+        row_cells[1].text = pdej_txt if data_pdej_totaux[jour] > 0 else "0"
+        
+        # Colonne 3 : Midi
+        midi_txt = f"{data_midi_totaux[jour]}"
+        if data_midi_details[jour].strip():
+            midi_txt += f" ({data_midi_details[jour].strip()})"
+        row_cells[2].text = midi_txt
+        
+        # Colonne 4 : Goûter
+        row_cells[3].text = "12" if jour != "VENDREDI" else ""
+        
+        # Colonne 5 : Soir
+        soir_txt = f"{data_soir_totaux[jour]}"
+        if data_soir_details[jour].strip():
+            soir_txt += f" ({data_soir_details[jour].strip()})"
+        row_cells[4].text = soir_txt if data_soir_totaux[jour] > 0 else ""
+        
+        # Centrer tous les textes à l'intérieur des lignes de données du tableau
+        for cell in row_cells:
+            cell.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
+            if len(cell.paragraphs[0].runs) > 0:
+                cell.paragraphs[0].runs[0].font.name = 'Arial'
+                cell.paragraphs[0].runs[0].font.size = Pt(9.5)
+                
+    # 4. Ajout de la ligne récapitulative finale pour le Total MECS
     total_cells = table.add_row().cells
     total_cells[0].text = "TOTAL MECS"
-    total_cells[2].text = "23"
-    total_cells[0].paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.LEFT
-    total_cells[2].paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
+    total_cells[2].text = f"{total_mecs_input}"
     
-    # Mise en gras de la ligne de total et fond gris léger
-    for cell in total_cells:
-        cell.paragraphs[0].runs[0].font.bold = True if cell.text else False
+    # Style de la ligne de total (Gras + Fond gris léger)
+    for idx, cell in enumerate(total_cells):
+        cell.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER if idx != 0 else WD_ALIGN_PARAGRAPH.LEFT
+        if len(cell.paragraphs[0].runs) > 0:
+            cell.paragraphs[0].runs[0].font.bold = True
+            cell.paragraphs[0].runs[0].font.name = 'Arial'
+            cell.paragraphs[0].runs[0].font.size = Pt(10)
         shd = parse_xml(r'<w:shd {} w:fill="F2F2F2"/>'.format(nsdecls('w')))
         cell._tc.get_or_add_tcPr().append(shd)
 
-    # Sauvegarde du document Word dans le flux de téléchargement
+    # 5. Conversion et envoi du fichier Docx fini vers le bouton de téléchargement
     doc_io = io.BytesIO()
     doc.save(doc_io)
     doc_io.seek(0)
     
-    st.success("🟢 Votre fichier Word a été construit à partir de la feuille !")
+    # Sauvegarde optionnelle dans Firebase pour archivage
+    if db:
+        try:
+            db.collection("nadutil_word_history").document(f"Semaine_{num_semaine}").set({
+                "semaine": num_semaine, "dates": dates_semaine, "total_mecs": total_mecs_input
+            })
+        except Exception:
+            pass
+            
+    st.success("🟢 Document Word complet construit avec l'intégralité de vos détails de parenthèses !")
     
     st.download_button(
-        label="📥 TÉLÉCHARGER LE FICHIER WORD (.docx)",
+        label="📥 TÉLÉCHARGER LE FICHIER WORD DÉTAILLÉ (.docx)",
         data=doc_io,
-        file_name=f"Facturation_Semaine_{num_semaine}.docx",
+        file_name=f"Facturation_Detaillee_Semaine_{num_semaine}.docx",
         mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-    )
