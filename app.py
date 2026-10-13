@@ -110,16 +110,16 @@ if uploaded_file is not None:
                     temperature=0.0,
                 )
                 
-                # RÉCUPÉRATION ET NETTOYAGE SÉCURISÉ DU JSON
-                result_text = chat_completion.choices.message.content.strip()
+                # 1. Récupération brute de la réponse textuelle de Groq
+                result_text = chat_completion.choices[0].message.content.strip()
                 
-                # Technique robuste pour extraire uniquement ce qui se trouve entre les balises ```json
+                # 2. Nettoyage sécurisé si le modèle a inclus des balises de code markdown (```json)
                 if "```json" in result_text:
                     result_text = result_text.split("```json")[1].split("```")[0].strip()
                 elif "```" in result_text:
                     result_text = result_text.split("```")[1].split("```")[0].strip()
                 
-                # Conversion en dictionnaire Python
+                # 3. Conversion en dictionnaire Python
                 donnees_extraites = json.loads(result_text)
                 st.session_state['donnees_repas'] = donnees_extraites
                 st.success("Extraction réussie selon votre structure !")
