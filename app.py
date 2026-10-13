@@ -154,12 +154,12 @@ if uploaded_file is not None:
                 }
                 """
                 
-                # Appel API corrigé avec choices[0] et format JSON natif
+                # Appel API avec max_tokens augmenté pour inclure le vendredi au complet
                 completion = client_groq.chat.completions.create(
                     messages=[{"role": "user", "content": [{"type": "text", "text": prompt}, {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{encoded_img}"}}]}],
                     model="qwen/qwen3.8-27b",
                     temperature=0.0,
-                    max_tokens=400,
+                    max_tokens=500,  # <--- MODIFIEZ CETTE VALEUR ICI (Passez de 400 à 500)
                     response_format={"type": "json_object"}
                 )
                 
