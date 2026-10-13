@@ -1,37 +1,77 @@
 import streamlit as st
 import pandas as pd
+import firebase_admin
+from firebase_admin import credentials, firestore
+from PIL import Image
+import easyocr
+import numpy as np
 import io
 
-# Configuration de la page Streamlit
-st.set_page_config(page_title="Nadutil - Gestion Cantine", page_icon="📊", layout="wide")
+# 1. CONFIGURATION DE L'INTERFACE
+st.set_page_config(page_title="Nadutil Autonome", page_icon="📊", layout="wide")
+st.title("📊 Application Autonome Nadutil")
+st.subheader("Analyse Automatique par Photo - Lycée Costa de Beauregard")
 
-st.title("📊 Bienvenue sur Nadutil")
-st.subheader("Gestion de la Restauration Scolaire - Lycée Costa de Beauregard")
+# 2. INITIALISATION SECURISEE DE FIREBASE
+if not firebase_admin._apps:
+    try:
+        firebase_secrets = dict(st.secrets["firebase"])
+        cred = credentials.Certificate(firebase_secrets)
+        firebase_admin.initialize_app(cred)
+        st.sidebar.success("🟢 Base de données Firebase connectée !")
+    except Exception:
+        st.sidebar.warning("🟡 Mode local actif (Firebase non configuré).")
 
-# --- CASE POUR COLLER LA FEUILLE DE SEMAINE ---
-st.write("### 📅 1. Collez le contenu de votre feuille de semaine ci-dessous :")
-texte_brut = st.text_area("Zone de collage (Format CSV / Texte brut) :", height=300, 
-                          placeholder="Collez vos données ici (ex: NOM, PRENOM, REGIME...)")
+db = firestore.client() if firebase_admin._apps else None
 
-# --- BOUTON DE TRAITEMENT ---
-if st.button("⚙️ Analyser et Générer le fichier Excel"):
-    if not texte_brut.strip():
-        st.warning("⚠️ Veuillez coller des données avant de lancer l'analyse.")
-    else:
-        lignes = texte_brut.strip().split("\n")
+# 3. ZONE AUTONOME : IMPORTATION DE LA PHOTO OU DU SCAN
+st.write("### 📸 1. Importez la photo ou le scan de votre feuille de semaine")
+fichier_image = st.file_uploader(
+    "Glissez-déposez votre image ici (Format PNG, JPG, JPEG) :", 
+    type=["png", "jpg", "jpeg"]
+)
+
+texte_analyse = ""
+
+if fichier_image is not None:
+    # Affichage de l'image importée à l'écran
+    image = Image.open(fichier_image)
+    st.image(image, caption="Feuille importée", width=350)
+    
+    with st.spinner("🧠 Lecture de l'image par l'IA en cours... Veuillez patienter..."):
+        try:
+            # Initialisation du lecteur OCR en Français
+            reader = easyocr.Reader(['fr'])
+            image_np = np.array(image)
+            resultat_ocr = reader.readtext(image_np, detail=0)
+            
+            # Reconstruction du texte brut ligne par ligne
+            texte_analyse = "\n".join(resultat_ocr)
+            st.success("📝 Lecture de l'image terminée ! Texte extrait avec succès.")
+        except Exception as e:
+            st.error(f"🔴 Erreur lors de la lecture de l'image : {e}")
+
+# 4. ALGORITHME D'ANALYSE ET GENERATION EXCEL
+if texte_analyse:
+    st.write("### ⚙️ 2. Traitement des effectifs de la restauration")
+    
+    if st.button("📊 CALCULER LES EFFECTIFS ET CRÉER LE FICHIER EXCEL"):
+        lignes = texte_analyse.split("\n")
         donnees_completes = []
-        entete_jours = ["LUNDI_Midi", "LUNDI_Soir", "MARDI_Midi", "MARDI_Soir", 
-                        "MERCREDI_Midi", "MERCREDI_Soir", "JEUDI_Midi", "JEUDI_Soir", 
-                        "VENDREDI_Midi", "VENDREDI_Soir"]
+        entete_jours = [
+            "LUNDI_Midi", "LUNDI_Soir", "MARDI_Midi", "MARDI_Soir", 
+            "MERCREDI_Midi", "MERCREDI_Soir", "JEUDI_Midi", "JEUDI_Soir", 
+            "VENDREDI_Midi", "VENDREDI_Soir"
+        ]
         
         classe_actuelle = "Inconnue"
         
-        # Algorithme d'analyse automatique (celui développé pour votre script)
         for ligne in lignes:
             ligne_nettoyee = ligne.strip()
             if not ligne_nettoyee:
                 continue
                 
+            # Détection automatique de la classe/section
             if any(c in ligne_nettoyee for c in ["4ème", "3ème", "CAPA", "2DE", "BAC PRO", "TERM", "BTS", "Ste ", "St "]):
                 classe_actuelle = ligne_nettoyee.replace(",", "").strip()
                 continue
@@ -39,9 +79,10 @@ if st.button("⚙️ Analyser et Générer le fichier Excel"):
             if "NOM" in ligne_nettoyee or "EFFECTIF" in ligne_nettoyee:
                 continue
                 
+            # Nettoyage et découpage de la ligne d'élève détectée
             elements = [e.strip() for e in ligne_nettoyee.split(",")]
             
-            if len(elements) >= 3 and elements[2] in ["D", "P", "D/F", "APP"]:
+            if len(elements) >= 3 and any(r in elements for r in ["D", "P", "D/F", "APP"]):
                 nom = elements[0]
                 prenom = elements[1]
                 regime = elements[2]
@@ -62,36 +103,39 @@ if st.button("⚙️ Analyser et Générer le fichier Excel"):
                     else:
                         repas_finals.append("")
                 
-                ligne_eleve = {"Classe/Section": classe_actuelle, "Nom": nom, "Prénom": prenom, "Régime": regime}
+                ligne_eleve = {
+                    "Classe/Section": classe_actuelle, 
+                    "Nom": nom, 
+                    "Prénom": prenom, 
+                    "Régime": regime
+                }
                 for j, jour_repas in enumerate(entete_jours):
                     ligne_eleve[jour_repas] = repas_finals[j]
                     
                 donnees_completes.append(ligne_eleve)
-        
+                
+                # Sauvegarde dans Firestore (Firebase) si actif
+                if db:
+                    try:
+                        db.collection("nadutil_eleves").document(f"{classe_actuelle}_{nom}_{prenom}").set(ligne_eleve)
+                    except Exception:
+                        pass
+
         if donnees_completes:
             df = pd.DataFrame(donnees_completes)
-            
-            # Affichage du tableau à l'écran dans Streamlit
-            st.success("🟢 Analyse terminée avec succès ! Voici un aperçu des données :")
             st.dataframe(df, use_container_width=True)
             
-            # Génération du fichier Excel en mémoire
+            # Création du fichier Excel téléchargeable
             buffer = io.BytesIO()
             with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
-                df.to_excel(writer, index=False, sheet_name='Suivi Cantine')
+                df.to_excel(writer, index=False, sheet_name='Facturation Cantine')
             buffer.seek(0)
             
-            # --- BOUTON DE TELECHARGEMENT ---
-            st.write("### 📥 2. Téléchargez votre fichier Excel mis à jour :")
             st.download_button(
-                label="📥 TÉLÉCHARGER LE FICHIER EXCEL (.xlsx)",
+                label="📥 TÉLÉCHARGER LE FICHIER EXCEL COMPLET (.xlsx)",
                 data=buffer,
                 file_name="Suivi_Semaine_Cantine.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
         else:
-            st.error("🔴 Aucun élève valide détecté. Vérifiez le format du texte collé.")
-
-# --- ZONE FUTURE FIREBASE ---
-st.sidebar.write("### 🔒 Connexion Firebase")
-st.sidebar.info("Prochaine étape : Liaison de la base de données Firebase pour sauvegarder l'historique des élèves.")
+            st.warning("⚠️ Le texte extrait de l'image ne contient pas de lignes au format attendu (NOM, PRENOM, REGIME).")
