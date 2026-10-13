@@ -33,18 +33,28 @@ fichier_image = st.file_uploader(
 texte_analyse = ""
 
 if fichier_image is not None:
-    # Affichage de l'image importée à l'écran
-    image = Image.open(fichier_image)
-    st.image(image, caption="Feuille importée", width=350)
+    # 1. Ouverture de l'image
+    image_brute = Image.open(fichier_image)
+    
+    # 2. REDRESSEMENT AUTOMATIQUE DE L'IMAGE SI ELLE EST DE CÔTÉ OU À L'ENVERS
+    try:
+        from PIL import ImageOps
+        image = ImageOps.exif_transpose(image_brute)
+    except Exception:
+        image = image_brute
+        
+    # Affichage de l'image remise droite à l'écran
+    st.image(image, caption="Feuille remise à l'endroit automatiquement", width=450)
     
     with st.spinner("🧠 Lecture de l'image par l'IA en cours... Veuillez patienter..."):
         try:
-            # Extraction du texte via Tesseract OCR (intégré nativement sur Streamlit Cloud)
+            # 3. Extraction du texte via Tesseract OCR
             texte_analyse = pytesseract.image_to_string(image, lang='fra')
+            
             if texte_analyse.strip():
                 st.success("📝 Lecture de l'image terminée ! Texte extrait avec succès.")
             else:
-                st.error("🔴 L'image a été lue mais aucun texte n'a pu être extrait. Assurez-vous que l'image est bien nette.")
+                st.error("🔴 L'image a été lue mais aucun texte n'a pu être extrait. Assurez-vous qu'elle est bien nette.")
         except Exception as e:
             st.error(f"🔴 Erreur lors de la lecture de l'image : {e}")
 
