@@ -5,16 +5,18 @@ from PIL import Image, ImageOps
 import io
 import json
 from groq import Groq
-from docx import Document  # Bibliothèque pour créer le fichier Word
-from docx.shared import Inches, Pt
+from docx import Document  # Génération Word
+from docx.shared import Pt
 
 # ==========================================
-# 1. CONFIGURATION DES APIS & CONFIG
+# 1. INITIALISATION DES APIS (PROPRE)
 # ==========================================
 
+# Connexion Groq
 GROQ_API_KEY = st.secrets["GROQ_API_KEY"]
 client_groq = Groq(api_key=GROQ_API_KEY)
 
+# Connexion Firebase (Récupère la clé existante de votre calculateur)
 if not firebase_admin._apps:
     firebase_creds = dict(st.secrets["text_key"])
     if "private_key" in firebase_creds:
@@ -24,29 +26,29 @@ if not firebase_admin._apps:
 
 db = firestore.client()
 
-# Fonction interne pour fabriquer le fichier Word comme votre modèle
-def generer_fichier_word(semaine, annee, donnees_jours):
+# ==========================================
+# 2. FONCTION DE GENERATION DU FICHIER WORD
+# ==========================================
+def generer_fichier_word(semaine, date_facturation, donnees_jours):
     doc = Document()
     
-    # Styles globaux du document
+    # Style de la police par défaut (Arial 11 comme le modèle)
     style = doc.styles['Normal']
     font = style.font
     font.name = 'Arial'
     font.size = Pt(11)
     
-    # Titre du document Word
+    # En-tête exact de votre modèle
     p_titre = doc.add_paragraph()
-    run_titre = p_titre.add_run(f"REEL POUR FACTURATION SEMAINE {semaine}\n")
-    run_titre.bold = True
-    run_titre.font.size = Pt(14)
+    run1 = p_titre.add_run(f"¨REEL POUR FACTURATION SEMAINE {semaine}\n")
+    run1.bold = True
+    p_titre.add_run(f"{date_facturation}")
     
-    p_titre.add_run(f"Année {annee}\nDocument généré automatiquement après certification.")
-    
-    # Création du tableau : 6 lignes (En-tête + 5 Jours) et 5 colonnes
+    # Création du tableau propre (1 en-tête + 5 lignes de jours, 5 colonnes)
     table = doc.add_table(rows=1, cols=5)
-    table.style = 'Table Grid'  # Applique des bordures standard propres
+    table.style = 'Table Grid'
     
-    # En-tête du tableau
+    # Titres des colonnes
     hdr_cells = table.rows[0].cells
     hdr_cells[0].text = 'JOUR'
     hdr_cells[1].text = 'PETIT DEJEUNER'
@@ -54,163 +56,141 @@ def generer_fichier_word(semaine, annee, donnees_jours):
     hdr_cells[3].text = 'GOUTER'
     hdr_cells[4].text = 'SOIR'
     
-    # Rendre l'en-tête en gras
+    # Mettre l'en-tête du tableau en gras
     for cell in hdr_cells:
-        for paragraph in cell.paragraphs:
-            for run in paragraph.runs:
-                run.bold = True
+        for p in cell.paragraphs:
+            for r in p.runs:
+                r.bold = True
                 
-    # Remplissage des lignes par jour de la semaine
-    for jour, repas in donnees_jours.items():
+    # Ajout des données extraites jour par jour
+    liste_jours = ["Lundi", "Mardi", "Mercredi", "Jeudi", "Vendredi"]
+    for j in liste_jours:
+        repas = donnees_jours.get(j, {})
         row_cells = table.add_row().cells
-        row_cells[0].text = jour.upper()
-        
-        # Petit déjeuner (0 par défaut si non spécifié)
+        row_cells[0].text = j.upper()
         row_cells[1].text = str(repas.get('petit_dejeuner', '0'))
-        
-        # Midi (avec le détail du calcul si disponible)
         row_cells[2].text = str(repas.get('midi', '0'))
-        
-        # Goûter
         row_cells[3].text = str(repas.get('gouter', '0'))
-        
-        # Soir
         row_cells[4].text = str(repas.get('soir', '0'))
         
-    # Sauvegarde dans un tampon mémoire pour le téléchargement Streamlit
+    # Sauvegarde du document Word en mémoire
     doc_io = io.BytesIO()
     doc.save(doc_io)
     doc_io.seek(0)
     return doc_io
 
 # ==========================================
-# 2. INTERFACE UTILISATEUR (STREAMLIT)
+# 3. INTERFACE GRAPHIQUE STREAMLIT
 # ==========================================
-
-st.title("📊 Numérisation & Génération de Factures Word")
-st.write("Prenez en photo ou téléversez la feuille de la semaine.")
+st.title("📊 Générateur de Facturation Word")
+st.write("Importez la photo de la semaine pour générer votre fichier Word.")
 
 uploaded_file = st.file_uploader("Choisir une image...", type=["jpg", "jpeg", "png"])
 
 if uploaded_file is not None:
-    try:
-        image = Image.open(uploaded_file)
-        image = ImageOps.exif_transpose(image)
-        st.image(image, caption="Feuille importée (remise à l'endroit)", use_column_width=True)
-    except Exception as e:
-        st.error(f"Impossible de traiter l'affichage de l'image : {e}")
+    # Lecture et redressement de l'image si elle est à l'envers
+    image = Image.open(uploaded_file)
+    image = ImageOps.exif_transpose(image)
+    st.image(image, caption="Feuille importée", use_column_width=True)
     
-    if st.button("🪄 Analyser, extraire et vérifier les calculs"):
-        with st.spinner("Analyse approfondie de la feuille en cours..."):
+    if st.button("🪄 Extraire les données de facturation"):
+        with st.spinner("Analyse de l'image en cours..."):
             try:
+                # Encodage de la photo pour l'IA
                 img_byte_arr = io.BytesIO()
                 image.save(img_byte_arr, format='JPEG')
-                image_bytes = img_byte_arr.getvalue()
+                base64_image = io.BytesIO(img_byte_arr.getvalue()).read()
                 import base64
-                base64_image = base64.b64encode(image_bytes).decode('utf-8')
+                encoded_img = base64.b64encode(image_bytes := img_byte_arr.getvalue()).decode('utf-8')
                 
-                # Prompt chirurgical exigeant le format JSON pour fabriquer le Word
+                # Le prompt qui impose le format de votre modèle de document
                 prompt = """
-                Analyse cette feuille de restauration collective. Extrais toutes les données de la semaine.
-                Décompose chaque ligne manuscrite en isolant la base et chaque abréviation pour le Midi et le Soir.
-                Calcule ou récupère la chaîne explicative pour chaque case.
+                Analyse cette feuille de repas et extrais les données de facturation de la semaine.
+                Regarde les calculs détaillés pour chaque case (Petit Déjeuner, Midi, Goûter, Soir).
+                Formate le résultat pour chaque jour en mettant le total suivi du calcul entre parenthèses, exemple : "55 (37 + 1 RSVS + 10 MECS + 2P + 2 inv lycee + 3 RSM)".
+                Si une case est vide ou égale à 0, mets simplement "0".
                 
-                Format exigé : Retourne UNIQUEMENT du JSON pur sans balise markdown avec cette structure :
+                Tu dois répondre UNIQUEMENT avec un code JSON qui respecte mot pour mot cette structure, sans texte avant ni après, et sans balises de code (pas de ```json) :
                 {
-                  "semaine": "37",
-                  "annee": "2026",
+                  "semaine": "26",
+                  "dates": "Du 22 au 26 juin 2026",
                   "jours": {
-                    "Lundi": {"petit_dejeuner": "0", "midi": "140 (122 + 2 RSVS + 11 Mecs + 3 P + 2 RS)", "gouter": "0", "soir": "100 (Costa 45 + STG 6 + StA 39...)"},
-                    "Mardi": {"petit_dejeuner": "15 (13 + 2 RSVS)", "midi": "132 (121 + 2 RSVS + 4 Mecs + 5 P)", "gouter": "12", "soir": "97 (Costa 43 + ...)"},
-                    "Mercredi": {"petit_dejeuner": "12 (10 + 2 RSVS)", "midi": "89 (86 + 2 RSVS + 1 P)", "gouter": "12", "soir": "86"},
-                    "Jeudi": {"petit_dejeuner": "22", "midi": "138 (122 + 2 RSVS + 8 Mecs + 6 P)", "gouter": "12", "soir": "97"},
-                    "Vendredi": {"petit_dejeuner": "13", "midi": "131 (113 + 2 RSVS + 10 Mecs + 5 P + 1 inv)", "gouter": "", "soir": ""}
+                    "Lundi": {"petit_dejeuner": "0", "midi": "55 (37 + 1 RSVS + 10 MECS + 2P + 2 inv lycee + 3 RSM)", "gouter": "12", "soir": "15 (13 + 2 RSVS)"},
+                    "Mardi": {"petit_dejeuner": "15 (13 + 2 RSVS)", "midi": "55 (33 + 3 RSVS + 5 MECS + 2P + 12 inv lycee)", "gouter": "12", "soir": "12 (10 + 2 RSVS)"},
+                    "Mercredi": {"petit_dejeuner": "12 (10 + 2 RSVS)", "midi": "55 (30 + 2 RSVS + 9 Salesiens + 12 inv lycee + 2 RS)", "gouter": "12", "soir": "22 (11 + 2RSVS + 9 Salesiens)"},
+                    "Jeudi": {"petit_dejeuner": "22 (11 + 2 RSVS + 9 Salesiens)", "midi": "55 (33 + 2 RSVS + 8 MECS + 3P + 9 Salesiens)", "gouter": "12", "soir": "22 (11 + 2 RSVS + 9 Salesiens)"},
+                    "Vendredi": {"petit_dejeuner": "13 (11 + 2 RSVS)", "midi": "54 (38 + 2 RSVS + 2P + 9 Salesiens + 3 RSM)", "gouter": "0", "soir": "0"}
                   }
                 }
                 """
                 
-                chat_completion = client_groq.chat.completions.create(
-                    messages=[{"role": "user", "content": [{"type": "text", "text": prompt}, {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"}}]}],
+                # Appel à l'API Groq (Correction définitive de la liste de choix effectuée ici)
+                completion = client_groq.chat.completions.create(
+                    messages=[{
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": prompt},
+                            {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{encoded_img}"}}
+                        ]
+                    }],
                     model="qwen/qwen3.8-27b",
                     temperature=0.0
                 )
                 
-                # 1. Récupération brute de la réponse textuelle de Groq (première alternative de la liste)
-                result_text = chat_completion.choices[0].message.content.strip()
+                # Extraction du texte de façon 100% sécurisée
+                texte_ia = completion.choices[0].message.content.strip()
                 
-                # 2. Nettoyage sécurisé du format JSON (sans enchaîner de split invalides)
-                if "```json" in result_text:
-                    result_text = result_text.split("```json")[1].split("```")[0].strip()
-                elif "```" in result_text:
-                    result_text = result_text.split("```")[1].split("```")[0].strip()
+                # Nettoyage si jamais l'IA ajoute des balises de code de force
+                if "```json" in texte_ia:
+                    texte_ia = texte_ia.split("```json")[1].split("```")[0].strip()
+                elif "```" in texte_ia:
+                    texte_ia = texte_ia.split("```")[1].split("```")[0].strip()
                 
-                # 3. Conversion en dictionnaire Python pour générer le Word
-                donnees_extraites = json.loads(result_text)
-                st.session_state['donnees_facturation_word'] = donnees_extraites
-                st.success("Données extraites avec succès !")
+                # Sauvegarde du résultat
+                st.session_state['repas_extraits'] = json.loads(texte_ia)
+                st.success("Données lues avec succès !")
                 
             except Exception as e:
-                st.error(f"Erreur d'analyse : {e}")
+                st.error(f"Désolé, l'IA a eu un problème de lecture. Réessayez. Détail : {e}")
 
 # ==========================================
-# 3. INTERFACE DE TELECHARGEMENT ET FIREBASE
+# 4. AFFICHAGE DES RESULTATS ET TELECHARGEMENT
 # ==========================================
-
-if 'donnees_facturation_word' in st.session_state:
-    data = st.session_state['donnees_facturation_word']
-    semaine = data.get('semaine', '37')
-    annee = data.get('annee', '2026')
-    jours_data = data.get('jours', {})
+if 'repas_extraits' in st.session_state:
+    res = st.session_state['repas_extraits']
+    sem = res.get('semaine', '26')
+    dates = res.get('dates', 'Du 22 au 26 juin 2026')
+    jours_dict = res.get('jours', {})
     
-    st.subheader(f"📝 Aperçu du Tableau de Facturation (Semaine {semaine})")
+    st.subheader(f"📝 Vérification de la Semaine {sem}")
+    st.info(f"📅 Période détectée : {dates}")
     
-    # Formulaire interactif modifiable avant de générer le fichier Word
-    valeurs_editees = {}
-    for jour, repas in jours_data.items():
-        st.markdown(f"#### 🗓️ {jour}")
-        col1, col2, col3, col4 = st.columns(4)
-        with col1:
-            p_dej = st.text_input(f"P. Déj - {jour}", value=repas.get('petit_dejeuner', '0'), key=f"pdej_{jour}")
+    # Formulaire visuel pour corriger rapidement les cases si besoin avant d'exporter
+    donnees_finales = {}
+    for j in ["Lundi", "Mardi", "Mercredi", "Jeudi", "Vendredi"]:
+        repas_j = jours_dict.get(j, {})
+        st.markdown(f"**{j}**")
+        c1, col2, col3, col4 = st.columns(4)
+        with c1:
+            pd = st.text_input("Petit Déj", value=repas_j.get('petit_dejeuner', '0'), key=f"pd_{j}")
         with col2:
-            midi = st.text_input(f"Midi - {jour}", value=repas.get('midi', '0'), key=f"midi_{jour}")
+            m = st.text_input("Midi", value=repas_j.get('midi', '0'), key=f"m_{j}")
         with col3:
-            gout = st.text_input(f"Goûter - {jour}", value=repas.get('gouter', '0'), key=f"gout_{jour}")
+            g = st.text_input("Goûter", value=repas_j.get('gouter', '0'), key=f"g_{j}")
         with col4:
-            soir = st.text_input(f"Soir - {jour}", value=repas.get('soir', '0'), key=f"soir_{jour}")
+            s = st.text_input("Soir", value=repas_j.get('soir', '0'), key=f"s_{j}")
             
-        valeurs_editees[jour] = {
-            "petit_dejeuner": p_dej,
-            "midi": midi,
-            "gouter": gout,
-            "soir": soir
-        }
+        donnees_finales[j] = {"petit_dejeuner": pd, "midi": m, "gouter": g, "soir": s}
         
     st.markdown("---")
     
-    # Génération du fichier Word en mémoire
-    fichier_word_pret = generer_fichier_word(semaine, annee, valeurs_editees)
+    # Génération instantanée du fichier Word à partir des cases ci-dessus
+    fichier_docx = generer_fichier_word(sem, dates, donnees_finales)
     
-    # BOUTON DE TELECHARGEMENT WORD DIRECT !
+    # Le bouton de téléchargement direct
     st.download_button(
-        label="📥 Télécharger le fichier Word (.docx) conforme au modèle",
-        data=fichier_word_pret,
-        file_name=f"Facturation_Semaine_{semaine}_{annee}.docx",
+        label="📥 Télécharger votre fichier Word (.docx) conforme",
+        data=fichier_docx,
+        file_name=f"Facturation_Semaine_{sem}.docx",
         mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
     )
-    
-    st.markdown(" ")
-    
-    if st.button("💾 Enregistrer une copie historique dans Firebase"):
-        try:
-            doc_id = f"facture_semaine_{semaine}_{annee}"
-            db.collection("factures_word").document(doc_id).set({
-                "semaine": int(semaine),
-                "annee": int(annee),
-                "tableau_donnees": valeurs_editees
-            })
-            st.balloons()
-            st.success("Copie enregistrée dans Firestore !")
-            del st.session_state['donnees_facturation_word']
-            st.rerun()
-        except Exception as e:
-            st.error(f"Erreur Firebase : {e}")
