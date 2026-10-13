@@ -1,126 +1,219 @@
-import streamlit as st
-import pandas as pd
-import firebase_admin
-from firebase_admin import credentials, firestore
-from PIL import Image, ImageOps
-import pytesseract
 import io
-import re
+import pandas as pd
+import openpyxl
+from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 
-# 1. CONFIGURATION DE L'INTERFACE
-st.set_page_config(page_title="Nadutil - Restauration Scolaire", page_icon="📊", layout="wide")
-st.title("📊 Application Autonome Nadutil")
-st.subheader("Analyse de la Restauration Scolaire - Lycée Costa de Beauregard")
 
-# 2. INITIALISATION FIREBASE
-if not firebase_admin._apps:
-    try:
-        firebase_secrets = dict(st.secrets["firebase"])
-        cred = credentials.Certificate(firebase_secrets)
-        firebase_admin.initialize_app(cred)
-        st.sidebar.success("🟢 Base de données Firebase connectée !")
-    except Exception:
-        st.sidebar.warning("🟡 Mode local actif (Firebase non configuré).")
+def generer_excel_presence(donnees_brutes):
+    # 1. Analyse et découpage du fichier brut
+    lignes = donnees_brutes.strip().split("\n")
 
-db = firestore.client() if firebase_admin._apps else None
+    titre_principal = "LYCEE COSTA DE BEAUREGARD"
+    sous_titre = "SEMAINE N° 41 du 05 septembre au 09 octobre 2026"
 
-# 3. ZONE D'IMPORTATION DE LA PHOTO
-st.write("### 📸 1. Importez la photo de votre feuille de semaine")
-fichier_image = st.file_uploader("Sélectionnez ou glissez la photo ici (PNG, JPG, JPEG) :", type=["png", "jpg", "jpeg"])
+    jours_colonnes = [
+        "LUNDI_Midi",
+        "LUNDI_Soir",
+        "MARDI_Midi",
+        "MARDI_Soir",
+        "MERCREDI_Midi",
+        "MERCREDI_Soir",
+        "JEUDI_Midi",
+        "JEUDI_Soir",
+        "VENDREDI_Midi",
+        "VENDREDI_Soir",
+    ]
 
-texte_extrait = ""
+    donnees_propres = []
+    classe_actuelle = "Inconnue"
 
-if fichier_image is not None:
-    image_brute = Image.open(fichier_image)
-    # Redressement automatique selon les capteurs du téléphone
-    try:
-        image = ImageOps.exif_transpose(image_brute)
-    except Exception:
-        image = image_brute
-        
-    st.image(image, caption="Feuille traitée par l'application", width=400)
-    
-    with st.spinner("🧠 Analyse optique et lecture de l'écriture en cours..."):
-        try:
-            texte_extrait = pytesseract.image_to_string(image, lang='fra')
-        except Exception as e:
-            st.error(f"🔴 Erreur de lecture : {e}")
+    for ligne in lignes:
+        ligne_nettoyee = ligne.strip()
+        if not ligne_nettoyee or ligne_nettoyee.startswith(",,,,"):
+            continue
 
-# 4. FORMULAIRE INTELLIGENT DE VALIDATION DES CHIFFRES
-if fichier_image is not None:
-    st.write("### ⚙️ 2. Vérification et validation des totaux de la semaine")
-    st.info("L'IA a lu la feuille. Vérifiez ou ajustez les totaux encadrés ci-dessous avant de générer l'Excel :")
-    
-    # Analyse rapide du texte pour tenter de deviner la semaine (ex: Semaine n°37)
-    semaine_detectee = "37"
-    match_semaine = re.search(r"(?:Semaine\s*n°\s*)(\d+)", texte_extrait, re.IGNORECASE)
-    if match_semaine:
-        semaine_detectee = match_semaine.group(1)
-        
-    num_semaine = st.text_input("Numéro de la semaine pour la facturation :", value=semaine_detectee)
-    
-    # Création de formulaires pour saisir/corriger les totaux entourés de la feuille
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        st.markdown("**🍽️ EFFECTIFS DU MIDI (Déjeuner)**")
-        repas_midi = {
-            "LUNDI": st.number_input("Midi - LUNDI (ex: 140) :", min_value=0, value=140),
-            "MARDI": st.number_input("Midi - MARDI (ex: 135) :", min_value=0, value=135),
-            "MERCREDI": st.number_input("Midi - MERCREDI (ex: 105) :", min_value=0, value=105),
-            "JEUDI": st.number_input("Midi - JEUDI (ex: 140) :", min_value=0, value=140),
-            "VENDREDI": st.number_input("Midi - VENDREDI (ex: 131) :", min_value=0, value=131),
-        }
-        
-    with col2:
-        st.markdown("**🌙 EFFECTIFS DU SOIR (Dîner)**")
-        repas_soir = {
-            "LUNDI": st.number_input("Soir - LUNDI (ex: 99) :", min_value=0, value=99),
-            "MARDI": st.number_input("Soir - MARDI (ex: 100) :", min_value=0, value=100),
-            "MERCREDI": st.number_input("Soir - MERCREDI (ex: 86) :", min_value=0, value=86),
-            "JEUDI": st.number_input("Soir - JEUDI (ex: 197) :", min_value=0, value=197),
-            "VENDREDI": st.number_input("Soir - VENDREDI (ex: 0) :", min_value=0, value=0),
-        }
+        # Détection du changement de section / classe
+        if any(
+            c in ligne_nettoyee
+            for c in [
+                "4ème",
+                "3ème",
+                "CAPA",
+                "2DE",
+                "BAC PRO",
+                "TERM",
+                "BTS",
+                "Ste ",
+                "St ",
+                "SECONDES",
+                "PREMIERES",
+                "TERMINALES",
+            ]
+        ):
+            classe_actuelle = ligne_nettoyee.replace(",", "").strip()
+            continue
 
-    # 5. BOUTON DE CRÉATION ET EXPORTATION EXCEL
-    if st.button("📊 CONSTRUIRE LE TABLEAU DE FACTURATION ET L'EXCEL"):
-        donnees_facturation = []
-        jours = ["LUNDI", "MARDI", "MERCREDI", "JEUDI", "VENDREDI"]
-        
-        for jour in jours:
-            ligne_jour = {
-                "JOUR": jour,
-                "PETIT DEJEUNER": 0 if jour == "LUNDI" else "X", # Gestion automatique des petits déjeuners des internes
-                "MIDI": repas_midi[jour],
-                "GOUTER": 12 if jour != "VENDREDI" else 0,       # Goûters fixes MECS automatiques
-                "SOIR": repas_soir[jour] if repas_soir[jour] > 0 else ""
+        # Ignorer les lignes de structure ou de résumé
+        if (
+            "NOM" in ligne_nettoyee
+            or "EFFECTIF" in ligne_nettoyee
+            or "INTERNES" in ligne_nettoyee
+            or "COSTA" in ligne_nettoyee
+        ):
+            continue
+
+        elements = [e.strip() for e in ligne_nettoyee.split(",")]
+
+        # Vérification qu'il s'agit d'une ligne d'un élève ou personnel valide
+        if len(elements) >= 3 and any(
+            r in elements[2] for r in ["D", "P", "D/F", "APP", "Rég"]
+        ):
+            nom = elements[0]
+            prenom = elements[1]
+            regime = elements[2]
+
+            # Extraction des notes spécifiques (PN, EXC, ABS) déjà présentes
+            repas_existants = elements[3:13]
+            while len(repas_existants) < 10:
+                repas_existants.append("")
+
+            repas_calcules = []
+            for idx, case in enumerate(repas_existants):
+                est_midi = idx % 2 == 0
+
+                # Si une note explicite existe, on la conserve précieusement
+                if case in ["PN", "EXC", "ABS", "REPAS"]:
+                    repas_calcules.append(case)
+                # Application de la règle automatique selon le régime de l'élève
+                elif "P" in regime:
+                    repas_calcules.append(
+                        "X"
+                    )  # Pensionnaire / Interne mange Midi et Soir
+                elif "D" in regime and est_midi:
+                    repas_calcules.append(
+                        "X"
+                    )  # Demi-pensionnaire mange uniquement le Midi
+                else:
+                    repas_calcules.append("")  # Pas de repas
+
+            # Structuration finale de la ligne
+            ligne_eleve = {
+                "Classe / Section": classe_actuelle,
+                "Nom": nom,
+                "Prénom": prenom,
+                "Régime": regime,
             }
-            donnees_facturation.append(ligne_jour)
-            
-            # Sauvegarde de sécurité de l'historique dans Firebase si connecté
-            if db:
-                try:
-                    db.collection("nadutil_facturation").document(f"Semaine_{num_semaine}_{jour}").set(ligne_jour)
-                except Exception:
-                    pass
-                    
-        # Création du DataFrame et affichage à l'écran
-        df_final = pd.DataFrame(donnees_facturation)
-        st.success(f"🟢 Tableau REEL POUR FACTURATION SEMAINE {num_semaine} généré avec succès !")
-        st.dataframe(df_final, use_container_width=True)
-        
-        # Génération du fichier Excel réel
-        buffer = io.BytesIO()
-        with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
-            df_final.to_excel(writer, index=False, sheet_name=f'Semaine {num_semaine}')
-        buffer.seek(0)
-        
-        st.download_button(
-            label="📥 TÉLÉCHARGER LE FICHIER EXCEL (.xlsx)",
-            data=buffer,
-            file_name=f"Facturation_Reel_Semaine_{num_semaine}.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            for j, jour_label in enumerate(jours_colonnes):
+                ligne_eleve[jour_label] = repas_calcules[j]
+
+            donnees_propres.append(ligne_eleve)
+
+    # Convertir en DataFrame Pandas
+    df = pd.DataFrame(donnees_propres)
+
+    # 2. Construction et mise en page stylisée de l'Excel avec OpenPyXL
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Suivi Rentrée"
+    ws.views.sheetView[0].showGridLines = True
+
+    # Ajout des titres
+    ws["A1"] = titre_principal
+    ws["A1"].font = Font(name="Arial", size=14, bold=True, color="1F4E78")
+    ws.merge_cells("A1:N1")
+
+    ws["A2"] = sous_titre
+    ws["A2"].font = Font(name="Arial", size=11, italic=True, color="595959")
+    ws.merge_cells("A2:N2")
+
+    # Création de la double ligne d'en-tête (Jours et Repas)
+    jours_header = ["LUNDI", "MARDI", "MERCREDI", "JEUDI", "VENDREDI"]
+    ws.append([])  # Ligne 3 vide de séparation
+
+    # En-têtes fixes
+    headers_principaux = ["Classe / Section", "Nom", "Prénom", "Régime"]
+    for col_num, header in enumerate(headers_principaux, 1):
+        cell = ws.cell(row=4, column=col_num, value=header)
+        ws.merge_cells(
+            start_row=4, start_column=col_num, end_row=5, end_column=col_num
         )
-        
-        if db:
-            st.info("💾 L'historique de cette semaine a été sauvegardé dans votre collection Firebase 'nadutil_facturation'.")
+
+    # En-têtes dynamiques de jours fusionnés
+    current_col = 5
+    for jour in jours_header:
+        ws.cell(row=4, column=current_col, value=jour)
+        ws.merge_cells(
+            start_row=4,
+            start_column=current_col,
+            end_row=4,
+            end_column=current_col + 1,
+        )
+        ws.cell(row=5, column=current_col, value="Midi")
+        ws.cell(row=5, column=current_col + 1, value="Soir")
+        current_col += 2
+
+    # Style des en-têtes (Lignes 4 et 5)
+    fill_header = PatternFill(
+        start_color="D9E1F2", end_color="D9E1F2", fill_type="solid"
+    )
+    font_header = Font(name="Arial", size=10, bold=True, color="000000")
+    thin_border = Border(
+        left=Side(style="thin", color="A6A6A6"),
+        right=Side(style="thin", color="A6A6A6"),
+        top=Side(style="thin", color="A6A6A6"),
+        bottom=Side(style="thin", color="A6A6A6"),
+    )
+
+    for r in:
+        for c in range(1, 15):
+            cell = ws.cell(row=r, column=c)
+            cell.fill = fill_header
+            cell.font = font_header
+            cell.alignment = Alignment(horizontal="center", vertical="center")
+            cell.border = thin_border
+
+    # 3. Remplissage des lignes d'élèves
+    for index, row in df.iterrows():
+        row_data = [
+            row["Classe / Section"],
+            row["Nom"],
+            row["Prénom"],
+            row["Régime"],
+            row["LUNDI_Midi"],
+            row["LUNDI_Soir"],
+            row["MARDI_Midi"],
+            row["MARDI_Soir"],
+            row["MERCREDI_Midi"],
+            row["MERCREDI_Soir"],
+            row["JEUDI_Midi"],
+            row["JEUDI_Soir"],
+            row["VENDREDI_Midi"],
+            row["VENDREDI_Soir"],
+        ]
+        ws.append(row_data)
+
+        # Appliquer les bordures et centrer les cases de repas
+        current_row = ws.max_row
+        for c in range(1, 15):
+            cell = ws.cell(row=current_row, column=c)
+            cell.font = Font(name="Arial", size=10)
+            cell.border = thin_border
+            if c > 4:
+                cell.alignment = Alignment(
+                    horizontal="center", vertical="center"
+                )
+                # Coloration légère des notes spécifiques pour la visibilité
+                if cell.value in ["PN", "EXC", "ABS"]:
+                    cell.font = Font(name="Arial", size=10, bold=True)
+
+    # Ajustement automatique de la largeur des colonnes pour éviter les coupures de texte
+    for col in ws.columns:
+        max_len = max(len(str(cell.value or "")) for cell in col)
+        col_letter = openpyxl.utils.get_column_letter(col[0].column)
+        ws.column_dimensions[col_letter].width = max(max_len + 3, 10)
+
+    # Sauvegarde du fichier dans un flux de bytes utilisable pour le téléchargement
+    output = io.BytesIO()
+    wb.save(output)
+    output.seek(0)
+    return output
