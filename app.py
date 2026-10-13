@@ -2,6 +2,10 @@ import streamlit as st
 from google import genai
 import firebase_admin
 from firebase_admin import credentials, firestore
+from PIL import Image, ImageOps  # <--- IL FAUT RAJOUTER CETTE LIGNE ICI !
+import io
+import json
+
 
 # ==========================================
 # 1. CONFIGURATION DES APIS & CONFIG
