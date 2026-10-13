@@ -1,219 +1,207 @@
-import io
+import streamlit as st
 import pandas as pd
-import openpyxl
-from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
+import firebase_admin
+from firebase_admin import credentials, firestore
+from PIL import Image, ImageOps
+import pytesseract
+import io
 
+# 1. CONFIGURATION DE L'INTERFACE
+st.set_page_config(page_title="Nadutil - Restauration Scolaire", page_icon="📊", layout="wide")
+st.title("📊 Application Autonome Nadutil")
+st.subheader("Analyse de la Restauration Scolaire - Lycée Costa de Beauregard")
 
-def generer_excel_presence(donnees_brutes):
-    # 1. Analyse et découpage du fichier brut
-    lignes = donnees_brutes.strip().split("\n")
+# 2. INITIALISATION SECURISEE DE FIREBASE
+if not firebase_admin._apps:
+    try:
+        firebase_secrets = dict(st.secrets["firebase"])
+        cred = credentials.Certificate(firebase_secrets)
+        firebase_admin.initialize_app(cred)
+        st.sidebar.success("🟢 Base de données Firebase connectée !")
+    except Exception:
+        st.sidebar.warning("🟡 Mode local actif ou Firebase non configuré dans les Secrets.")
 
-    titre_principal = "LYCEE COSTA DE BEAUREGARD"
-    sous_titre = "SEMAINE N° 41 du 05 septembre au 09 octobre 2026"
+db = firestore.client() if firebase_admin._apps else None
 
-    jours_colonnes = [
-        "LUNDI_Midi",
-        "LUNDI_Soir",
-        "MARDI_Midi",
-        "MARDI_Soir",
-        "MERCREDI_Midi",
-        "MERCREDI_Soir",
-        "JEUDI_Midi",
-        "JEUDI_Soir",
-        "VENDREDI_Midi",
-        "VENDREDI_Soir",
-    ]
+# 3. ZONE D'IMPORTATION DE LA PHOTO
+st.write("### 📸 Option A : Importez la photo ou le scan de votre feuille de semaine")
+fichier_image = st.file_uploader("Sélectionnez ou glissez la photo ici (PNG, JPG, JPEG) :", type=["png", "jpg", "jpeg"])
 
+texte_extrait = ""
+
+if fichier_image is not None:
+    image_brute = Image.open(fichier_image)
+    # Redressement automatique de l'image
+    try:
+        image = ImageOps.exif_transpose(image_brute)
+    except Exception:
+        image = image_brute
+        
+    st.image(image, caption="Feuille traitée par l'application", width=400)
+    
+    with st.spinner("🧠 Analyse optique et lecture de la feuille en cours..."):
+        try:
+            texte_extrait = pytesseract.image_to_string(image, lang='fra')
+        except Exception as e:
+            st.error(f"🔴 Erreur de lecture de l'image : {e}")
+
+# ZONE DE SECOURS PAR COPIER-COLLER TEXTE
+st.write("---")
+st.write("### 📝 Option B (Secours) : Ou collez directement le format texte/CSV de la semaine")
+texte_colle = st.text_area("Zone de collage direct (Si la photo est illisible ou raturée) :", height=200, placeholder="Collez vos données brutes ici...")
+
+if texte_colle.strip():
+    texte_extrait = texte_colle
+
+# 4. TRAITEMENT DES DONNÉES ET GÉNÉRATION DU FICHIER EXCEL STYLISÉ
+if texte_extrait.strip():
+    st.write("### ⚙️ 2. Traitement des lignes d'élèves et génération du pointage")
+    
+    import openpyxl
+    from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
+    
+    lignes = texte_extrait.strip().split("\n")
     donnees_propres = []
+    jours_colonnes = ["LUNDI_Midi", "LUNDI_Soir", "MARDI_Midi", "MARDI_Soir", "MERCREDI_Midi", "MERCREDI_Soir", "JEUDI_Midi", "JEUDI_Soir", "VENDREDI_Midi", "VENDREDI_Soir"]
     classe_actuelle = "Inconnue"
-
+    
     for ligne in lignes:
         ligne_nettoyee = ligne.strip()
         if not ligne_nettoyee or ligne_nettoyee.startswith(",,,,"):
             continue
-
-        # Détection du changement de section / classe
-        if any(
-            c in ligne_nettoyee
-            for c in [
-                "4ème",
-                "3ème",
-                "CAPA",
-                "2DE",
-                "BAC PRO",
-                "TERM",
-                "BTS",
-                "Ste ",
-                "St ",
-                "SECONDES",
-                "PREMIERES",
-                "TERMINALES",
-            ]
-        ):
+            
+        # Détection de la classe
+        if any(c in ligne_nettoyee for c in ["4ème", "3ème", "CAPA", "2DE", "BAC PRO", "TERM", "BTS", "Ste ", "St ", "SECONDES", "PREMIERES", "TERMINALES"]):
             classe_actuelle = ligne_nettoyee.replace(",", "").strip()
             continue
-
-        # Ignorer les lignes de structure ou de résumé
-        if (
-            "NOM" in ligne_nettoyee
-            or "EFFECTIF" in ligne_nettoyee
-            or "INTERNES" in ligne_nettoyee
-            or "COSTA" in ligne_nettoyee
-        ):
+            
+        # Ignorer les lignes de structure de l'en-tête
+        if "NOM" in ligne_nettoyee or "EFFECTIF" in ligne_nettoyee or "INTERNES" in ligne_nettoyee or "COSTA" in ligne_nettoyee:
             continue
-
+            
         elements = [e.strip() for e in ligne_nettoyee.split(",")]
-
-        # Vérification qu'il s'agit d'une ligne d'un élève ou personnel valide
-        if len(elements) >= 3 and any(
-            r in elements[2] for r in ["D", "P", "D/F", "APP", "Rég"]
-        ):
+        
+        # Validation d'une ligne élève ou personnel
+        if len(elements) >= 3 and any(r in elements for r in ["D", "P", "D/F", "APP"]):
             nom = elements[0]
             prenom = elements[1]
             regime = elements[2]
-
-            # Extraction des notes spécifiques (PN, EXC, ABS) déjà présentes
+            
             repas_existants = elements[3:13]
             while len(repas_existants) < 10:
                 repas_existants.append("")
-
+                
             repas_calcules = []
             for idx, case in enumerate(repas_existants):
-                est_midi = idx % 2 == 0
-
-                # Si une note explicite existe, on la conserve précieusement
+                est_midi = (idx % 2 == 0)
+                
+                # Conserver les statuts spécifiques
                 if case in ["PN", "EXC", "ABS", "REPAS"]:
                     repas_calcules.append(case)
-                # Application de la règle automatique selon le régime de l'élève
+                # Attribution automatique des coches réglementaires X
                 elif "P" in regime:
-                    repas_calcules.append(
-                        "X"
-                    )  # Pensionnaire / Interne mange Midi et Soir
+                    repas_calcules.append("X")  # Pensionnaire mange Midi et Soir
                 elif "D" in regime and est_midi:
-                    repas_calcules.append(
-                        "X"
-                    )  # Demi-pensionnaire mange uniquement le Midi
+                    repas_calcules.append("X")  # Demi-pensionnaire mange uniquement le Midi
                 else:
-                    repas_calcules.append("")  # Pas de repas
-
-            # Structuration finale de la ligne
-            ligne_eleve = {
-                "Classe / Section": classe_actuelle,
-                "Nom": nom,
-                "Prénom": prenom,
-                "Régime": regime,
-            }
+                    repas_calcules.append("")
+            
+            # Structuration finale
+            ligne_eleve = {"Classe / Section": classe_actuelle, "Nom": nom, "Prénom": prenom, "Régime": regime}
             for j, jour_label in enumerate(jours_colonnes):
                 ligne_eleve[jour_label] = repas_calcules[j]
-
+                
             donnees_propres.append(ligne_eleve)
+            
+            # Sauvegarde automatique dans la collection Firebase nadutil_eleves
+            if db:
+                try:
+                    db.collection("nadutil_eleves").document(f"{classe_actuelle}_{nom}_{prenom}").set(ligne_eleve)
+                except Exception:
+                    pass
 
-    # Convertir en DataFrame Pandas
-    df = pd.DataFrame(donnees_propres)
-
-    # 2. Construction et mise en page stylisée de l'Excel avec OpenPyXL
-    wb = openpyxl.Workbook()
-    ws = wb.active
-    ws.title = "Suivi Rentrée"
-    ws.views.sheetView[0].showGridLines = True
-
-    # Ajout des titres
-    ws["A1"] = titre_principal
-    ws["A1"].font = Font(name="Arial", size=14, bold=True, color="1F4E78")
-    ws.merge_cells("A1:N1")
-
-    ws["A2"] = sous_titre
-    ws["A2"].font = Font(name="Arial", size=11, italic=True, color="595959")
-    ws.merge_cells("A2:N2")
-
-    # Création de la double ligne d'en-tête (Jours et Repas)
-    jours_header = ["LUNDI", "MARDI", "MERCREDI", "JEUDI", "VENDREDI"]
-    ws.append([])  # Ligne 3 vide de séparation
-
-    # En-têtes fixes
-    headers_principaux = ["Classe / Section", "Nom", "Prénom", "Régime"]
-    for col_num, header in enumerate(headers_principaux, 1):
-        cell = ws.cell(row=4, column=col_num, value=header)
-        ws.merge_cells(
-            start_row=4, start_column=col_num, end_row=5, end_column=col_num
+    # 5. CONSTRUCTION VISUELLE DU TABLEAU ET EXPORTATION EXCEL
+    if donnees_propres:
+        df = pd.DataFrame(donnees_propres)
+        st.success("🟢 Analyse terminée ! Voici le tableau complet généré automatiquement :")
+        st.dataframe(df, use_container_width=True)
+        
+        # Création du classeur Excel stylisé avec OpenPyXL
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = "Suivi Présence"
+        ws.views.sheetView.showGridLines = True  # Forcer l'affichage de la grille
+        
+        # Titres
+        ws["A1"] = "LYCEE COSTA DE BEAUREGARD"
+        ws["A1"].font = Font(name="Arial", size=14, bold=True, color="1F4E78")
+        ws.merge_cells("A1:N1")
+        
+        ws["A2"] = "Suivi Automatisé des Présences de Restauration Scolaire"
+        ws["A2"].font = Font(name="Arial", size=11, italic=True, color="595959")
+        ws.merge_cells("A2:N2")
+        
+        # En-têtes fixes fusionnés verticalement
+        headers_principaux = ["Classe / Section", "Nom", "Prénom", "Régime"]
+        for col_num, header in enumerate(headers_principaux, 1):
+            ws.cell(row=4, column=col_num, value=header)
+            ws.merge_cells(start_row=4, start_column=col_num, end_row=5, end_column=col_num)
+            
+        # En-têtes des jours fusionnés horizontalement
+        jours_header = ["LUNDI", "MARDI", "MERCREDI", "JEUDI", "VENDREDI"]
+        current_col = 5
+        for jour in jours_header:
+            ws.cell(row=4, column=current_col, value=jour)
+            ws.merge_cells(start_row=4, start_column=current_col, end_row=4, end_column=current_col+1)
+            ws.cell(row=5, column=current_col, value="Midi")
+            ws.cell(row=5, column=current_col+1, value="Soir")
+            current_col += 2
+            
+        # Style des en-têtes (Lignes 4 et 5)
+        fill_header = PatternFill(start_color="D9E1F2", end_color="D9E1F2", fill_type="solid")
+        font_header = Font(name="Arial", size=10, bold=True)
+        thin_border = Border(left=Side(style='thin', color='A6A6A6'), right=Side(style='thin', color='A6A6A6'), top=Side(style='thin', color='A6A6A6'), bottom=Side(style='thin', color='A6A6A6'))
+        
+        # LA LIGNE CORRIGÉE ICI : Application du style sur les deux lignes d'en-tête (4 et 5)
+        for r in [4, 5]:
+            for c in range(1, 15):
+                cell = ws.cell(row=r, column=c)
+                cell.fill = fill_header
+                cell.font = font_header
+                cell.alignment = Alignment(horizontal="center", vertical="center")
+                cell.border = thin_border
+                
+        # Écriture des élèves et raccordement des styles
+        for index, row in df.iterrows():
+            row_data = [row["Classe / Section"], row["Nom"], row["Prénom"], row["Régime"], row["LUNDI_Midi"], row["LUNDI_Soir"], row["MARDI_Midi"], row["MARDI_Soir"], row["MERCREDI_Midi"], row["MERCREDI_Soir"], row["JEUDI_Midi"], row["JEUDI_Soir"], row["VENDREDI_Midi"], row["VENDREDI_Soir"]]
+            ws.append(row_data)
+            current_row = ws.max_row
+            for c in range(1, 15):
+                cell = ws.cell(row=current_row, column=c)
+                cell.font = Font(name="Arial", size=10)
+                cell.border = thin_border
+                if c > 4:
+                    cell.alignment = Alignment(horizontal="center", vertical="center")
+                    if cell.value in ["PN", "EXC", "ABS"]:
+                        cell.font = Font(name="Arial", size=10, bold=True)
+                        
+        # Redimensionnement automatique des largeurs de colonnes
+        for col in ws.columns:
+            max_len = max(len(str(cell.value or '')) for cell in col)
+            col_letter = openpyxl.utils.get_column_letter(col.column)
+            ws.column_dimensions[col_letter].width = max(max_len + 3, 10)
+            
+        # Conversion du classeur Excel en flux téléchargeable
+        buffer = io.BytesIO()
+        wb.save(buffer)
+        buffer.seek(0)
+        
+        st.write("### 📥 3. Récupérez votre document")
+        st.download_button(
+            label="📥 TÉLÉCHARGER LE FICHIER EXCEL (.xlsx)",
+            data=buffer,
+            file_name="Suivi_Rentrée_Cantine_Complete.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
-
-    # En-têtes dynamiques de jours fusionnés
-    current_col = 5
-    for jour in jours_header:
-        ws.cell(row=4, column=current_col, value=jour)
-        ws.merge_cells(
-            start_row=4,
-            start_column=current_col,
-            end_row=4,
-            end_column=current_col + 1,
-        )
-        ws.cell(row=5, column=current_col, value="Midi")
-        ws.cell(row=5, column=current_col + 1, value="Soir")
-        current_col += 2
-
-    # Style des en-têtes (Lignes 4 et 5)
-    fill_header = PatternFill(
-        start_color="D9E1F2", end_color="D9E1F2", fill_type="solid"
-    )
-    font_header = Font(name="Arial", size=10, bold=True, color="000000")
-    thin_border = Border(
-        left=Side(style="thin", color="A6A6A6"),
-        right=Side(style="thin", color="A6A6A6"),
-        top=Side(style="thin", color="A6A6A6"),
-        bottom=Side(style="thin", color="A6A6A6"),
-    )
-
-    for r in:
-        for c in range(1, 15):
-            cell = ws.cell(row=r, column=c)
-            cell.fill = fill_header
-            cell.font = font_header
-            cell.alignment = Alignment(horizontal="center", vertical="center")
-            cell.border = thin_border
-
-    # 3. Remplissage des lignes d'élèves
-    for index, row in df.iterrows():
-        row_data = [
-            row["Classe / Section"],
-            row["Nom"],
-            row["Prénom"],
-            row["Régime"],
-            row["LUNDI_Midi"],
-            row["LUNDI_Soir"],
-            row["MARDI_Midi"],
-            row["MARDI_Soir"],
-            row["MERCREDI_Midi"],
-            row["MERCREDI_Soir"],
-            row["JEUDI_Midi"],
-            row["JEUDI_Soir"],
-            row["VENDREDI_Midi"],
-            row["VENDREDI_Soir"],
-        ]
-        ws.append(row_data)
-
-        # Appliquer les bordures et centrer les cases de repas
-        current_row = ws.max_row
-        for c in range(1, 15):
-            cell = ws.cell(row=current_row, column=c)
-            cell.font = Font(name="Arial", size=10)
-            cell.border = thin_border
-            if c > 4:
-                cell.alignment = Alignment(
-                    horizontal="center", vertical="center"
-                )
-                # Coloration légère des notes spécifiques pour la visibilité
-                if cell.value in ["PN", "EXC", "ABS"]:
-                    cell.font = Font(name="Arial", size=10, bold=True)
-
-    # Ajustement automatique de la largeur des colonnes pour éviter les coupures de texte
-    for col in ws.columns:
-        max_len = max(len(str(cell.value or "")) for cell in col)
-        col_letter = openpyxl.utils.get_column_letter(col[0].column)
-        ws.column_dimensions[col_letter].width = max(max_len + 3, 10)
-
-    # Sauvegarde du fichier dans un flux de bytes utilisable pour le téléchargement
-    output = io.BytesIO()
-    wb.save(output)
-    output.seek(0)
-    return output
+    else:
+        st.warning("⚠️ Aucun élève valide détecté. Vérifiez la structure de votre texte.")
