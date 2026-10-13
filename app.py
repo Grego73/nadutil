@@ -145,28 +145,26 @@ if uploaded_file is not None:
                 import base64
                 encoded_img = base64.b64encode(img_byte_arr.getvalue()).decode('utf-8')
                 
-                # Prompt ultra-court et condensé pour économiser les jetons (OTPM)
+                # Prompt ultra-optimisé (Clés courtes pour économiser les jetons et lire TOUTE la semaine)
                 prompt = """
-                Analyse la feuille de repas. Extrais les données pour MIDI et SOIR.
+                Analyse la feuille de repas. Extrais TOUS les jours (Lundi au Vendredi) pour MIDI et SOIR.
                 Pour chaque case, donne le total suivi du calcul complet entre parenthèses.
-                Si une case est raturée ou fausse, conserve la formule textuelle exacte écrite par l'humain.
-                Mets "0" si c'est vide.
+                Sois très précis sur les chiffres écrits. Si une case est vide, mets "0".
                 
-                Format de réponse attendu (JSON strict uniquement) :
+                Format JSON strict (ne coupe pas avant vendredi) :
                 {
-                  "semaine": "37",
+                  "sem": "37",
                   "dates": "Du 7 au 11 septembre 2026",
                   "jours": {
-                    "Lundi": {"midi": "140 (122 + 2 RSVS + 11 Necs + 3 P + 2 RS)", "soir": "100 (Costa 45 + StG 6 + StA 39 + BTS 2 + Educ 2 + NECS 5 + 2)"},
-                    "Mardi": {"midi": "...", "soir": "..."},
-                    "Mercredi": {"midi": "...", "soir": "..."},
-                    "Jeudi": {"midi": "...", "soir": "..."},
-                    "Vendredi": {"midi": "...", "soir": "0"}
+                    "Lundi": {"m": "140 (122 + 2 RSVS + 11 Necs + 3 P + 2 RS)", "s": "100 (Costa 45 + StG 6 + StA 39 + BTS 2 + Educ 2 + NECS 5 + 2)"},
+                    "Mardi": {"m": "132 (121 + 2 RSVS + 4 Mecs + 5 P)", "s": "100 (Costa 43 + BTS 02 + Educ 02 + NECS 05 + StG 06 + StA 35 + 3)"},
+                    "Mercredi": {"m": "89 (86 + 2 RSVS + 1 P)", "s": "86 (Costa 40 + BTS 2 + Educ 2 + NECS 4 + StG 5 + StA 33 + 2)"},
+                    "Jeudi": {"m": "138 (122 + 2 RSVS + 8 Necs + 6 P)", "s": "97 (Costa 43 + BTS 02 + Educ 03 + NECS 06 + StG 06 + StA 36 + Invité 01)"},
+                    "Vendredi": {"m": "131 (113 + 2 RSVS + 10 Mecs + 5 P + 1 invité)", "s": "0"}
                   }
                 }
                 """
                 
-                # Appel API optimisé avec format JSON forcé et max_tokens très bas
                 completion = client_groq.chat.completions.create(
                     messages=[{
                         "role": "user",
@@ -177,18 +175,34 @@ if uploaded_file is not None:
                     }],
                     model="qwen/qwen3.8-27b",
                     temperature=0.0,
-                    max_tokens=250,  # Bridage strict accepté par les limites gratuites
-                    response_format={"type": "json_object"}  # Force Groq à envoyer du JSON natif propre
+                    max_tokens=350,  # Augmenté légèrement pour laisser la place de finir le Vendredi
+                    response_format={"type": "json_object"}
                 )
                 
-                texte_ia = completion.choices[0].message.content.strip()
+                texte_ia = completion.choices.message.content.strip()
                 
-                # Conversion directe en dictionnaire Python (plus besoin de splits compliqués !)
-                st.session_state['repas_extraits'] = json.loads(texte_ia)
-                st.success("Données extraites avec succès !")
+                # Conversion du JSON
+                brut_data = json.loads(texte_ia)
+                
+                # Reconstruction automatique pour l'affichage (on remet les clés longues attendues par votre interface)
+                structure_propre = {
+                    "semaine": brut_data.get("sem", "37"),
+                    "dates": brut_data.get("dates", ""),
+                    "jours": {}
+                }
+                
+                for jour, valeurs in brut_data.get("jours", {}).items():
+                    structure_propre["jours"][jour] = {
+                        "midi": valeurs.get("m", "0"),
+                        "soir": valeurs.get("s", "0")
+                    }
+                
+                st.session_state['repas_extraits'] = structure_propre
+                st.success("Données de la semaine complète extraites avec succès !")
                 
             except Exception as e:
                 st.error(f"Erreur d'analyse. Détail : {e}")
+
 
 
 # ==========================================
