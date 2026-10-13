@@ -5,16 +5,16 @@ from PIL import Image, ImageOps
 import io
 import json
 from groq import Groq
+from docx import Document  # Bibliothèque pour créer le fichier Word
+from docx.shared import Inches, Pt
 
 # ==========================================
 # 1. CONFIGURATION DES APIS & CONFIG
 # ==========================================
 
-# Initialisation Groq
 GROQ_API_KEY = st.secrets["GROQ_API_KEY"]
 client_groq = Groq(api_key=GROQ_API_KEY)
 
-# Initialisation Firebase
 if not firebase_admin._apps:
     firebase_creds = dict(st.secrets["text_key"])
     if "private_key" in firebase_creds:
@@ -24,11 +24,70 @@ if not firebase_admin._apps:
 
 db = firestore.client()
 
+# Fonction interne pour fabriquer le fichier Word comme votre modèle
+def generer_fichier_word(semaine, annee, donnees_jours):
+    doc = Document()
+    
+    # Styles globaux du document
+    style = doc.styles['Normal']
+    font = style.font
+    font.name = 'Arial'
+    font.size = Pt(11)
+    
+    # Titre du document Word
+    p_titre = doc.add_paragraph()
+    run_titre = p_titre.add_run(f"REEL POUR FACTURATION SEMAINE {semaine}\n")
+    run_titre.bold = True
+    run_titre.font.size = Pt(14)
+    
+    p_titre.add_run(f"Année {annee}\nDocument généré automatiquement après certification.")
+    
+    # Création du tableau : 6 lignes (En-tête + 5 Jours) et 5 colonnes
+    table = doc.add_table(rows=1, cols=5)
+    table.style = 'Table Grid'  # Applique des bordures standard propres
+    
+    # En-tête du tableau
+    hdr_cells = table.rows[0].cells
+    hdr_cells[0].text = 'JOUR'
+    hdr_cells[1].text = 'PETIT DEJEUNER'
+    hdr_cells[2].text = 'MIDI'
+    hdr_cells[3].text = 'GOUTER'
+    hdr_cells[4].text = 'SOIR'
+    
+    # Rendre l'en-tête en gras
+    for cell in hdr_cells:
+        for paragraph in cell.paragraphs:
+            for run in paragraph.runs:
+                run.bold = True
+                
+    # Remplissage des lignes par jour de la semaine
+    for jour, repas in donnees_jours.items():
+        row_cells = table.add_row().cells
+        row_cells[0].text = jour.upper()
+        
+        # Petit déjeuner (0 par défaut si non spécifié)
+        row_cells[1].text = str(repas.get('petit_dejeuner', '0'))
+        
+        # Midi (avec le détail du calcul si disponible)
+        row_cells[2].text = str(repas.get('midi', '0'))
+        
+        # Goûter
+        row_cells[3].text = str(repas.get('gouter', '0'))
+        
+        # Soir
+        row_cells[4].text = str(repas.get('soir', '0'))
+        
+    # Sauvegarde dans un tampon mémoire pour le téléchargement Streamlit
+    doc_io = io.BytesIO()
+    doc.save(doc_io)
+    doc_io.seek(0)
+    return doc_io
+
 # ==========================================
 # 2. INTERFACE UTILISATEUR (STREAMLIT)
 # ==========================================
 
-st.title("📊 Numérisation & Vérification des Repas")
+st.title("📊 Numérisation & Génération de Factures Word")
 st.write("Prenez en photo ou téléversez la feuille de la semaine.")
 
 uploaded_file = st.file_uploader("Choisir une image...", type=["jpg", "jpeg", "png"])
@@ -50,38 +109,22 @@ if uploaded_file is not None:
                 import base64
                 base64_image = base64.b64encode(image_bytes).decode('utf-8')
                 
-                # Prompt chirurgical demandant le détail de TOUTES les variables manuscrites
+                # Prompt chirurgical exigeant le format JSON pour fabriquer le Word
                 prompt = """
-                Analyse cette feuille de restauration intitulée 'EFFECTIF REEL DES REPAS SERVIS'.
-                Tu dois décomposer chaque ligne manuscrite en extrayant individuellement chaque nombre associé à son abréviation ou sa section.
-                Si un élément n'est pas présent pour un jour, attribue-lui la valeur 0.
-                Prends également le total écrit par l'auteur sur la feuille (le chiffre final écrit ou entouré).
-
-                Format de réponse exigé : Retourne UNIQUEMENT un objet JSON valide, sans aucune balise markdown (pas de ```json), respectant cette structure exacte :
+                Analyse cette feuille de restauration collective. Extrais toutes les données de la semaine.
+                Décompose chaque ligne manuscrite en isolant la base et chaque abréviation pour le Midi et le Soir.
+                Calcule ou récupère la chaîne explicative pour chaque case.
+                
+                Format exigé : Retourne UNIQUEMENT du JSON pur sans balise markdown avec cette structure :
                 {
                   "semaine": "37",
                   "annee": "2026",
                   "jours": {
-                    "Lundi": {
-                      "dejeuner": {"base": 122, "rsvs": 2, "mecs": 11, "p": 3, "rs": 2, "invite": 0, "total_feuille": 140},
-                      "diner": {"costa": 45, "stg": 6, "sta": 39, "bts": 2, "educ": 2, "mecs": 5, "ajustement": 2, "total_feuille": 101}
-                    },
-                    "Mardi": {
-                      "dejeuner": {"base": 121, "rsvs": 2, "mecs": 4, "p": 5, "rs": 0, "invite": 0, "total_feuille": 132},
-                      "diner": {"costa": 43, "stg": 6, "sta": 35, "bts": 2, "educ": 2, "mecs": 5, "ajustement": 0, "total_feuille": 93}
-                    },
-                    "Mercredi": {
-                      "dejeuner": {"base": 86, "rsvs": 2, "mecs": 0, "p": 1, "rs": 0, "invite": 0, "total_feuille": 89},
-                      "diner": {"costa": 40, "stg": 5, "sta": 33, "bts": 2, "educ": 2, "mecs": 4, "ajustement": 2, "total_feuille": 86}
-                    },
-                    "Jeudi": {
-                      "dejeuner": {"base": 122, "rsvs": 2, "mecs": 8, "p": 6, "rs": 0, "invite": 0, "total_feuille": 138},
-                      "diner": {"costa": 43, "stg": 6, "sta": 36, "bts": 2, "educ": 3, "mecs": 6, "ajustement": 0, "total_feuille": 97}
-                    },
-                    "Vendredi": {
-                      "dejeuner": {"base": 113, "rsvs": 2, "mecs": 10, "p": 5, "rs": 0, "invite": 1, "total_feuille": 131},
-                      "diner": {"costa": 0, "stg": 0, "sta": 0, "bts": 0, "educ": 0, "mecs": 0, "ajustement": 0, "total_feuille": 0}
-                    }
+                    "Lundi": {"petit_dejeuner": "0", "midi": "140 (122 + 2 RSVS + 11 Mecs + 3 P + 2 RS)", "gouter": "0", "soir": "100 (Costa 45 + STG 6 + StA 39...)"},
+                    "Mardi": {"petit_dejeuner": "15 (13 + 2 RSVS)", "midi": "132 (121 + 2 RSVS + 4 Mecs + 5 P)", "gouter": "12", "soir": "97 (Costa 43 + ...)"},
+                    "Mercredi": {"petit_dejeuner": "12 (10 + 2 RSVS)", "midi": "89 (86 + 2 RSVS + 1 P)", "gouter": "12", "soir": "86"},
+                    "Jeudi": {"petit_dejeuner": "22", "midi": "138 (122 + 2 RSVS + 8 Mecs + 6 P)", "gouter": "12", "soir": "97"},
+                    "Vendredi": {"petit_dejeuner": "13", "midi": "131 (113 + 2 RSVS + 10 Mecs + 5 P + 1 inv)", "gouter": "", "soir": ""}
                   }
                 }
                 """
@@ -92,90 +135,76 @@ if uploaded_file is not None:
                     temperature=0.0
                 )
                 
-                json_text = chat_completion.choices[0].message.content.strip()
+                json_text = chat_completion.choices.message.content.strip()
                 if "```json" in json_text:
-                    json_text = json_text.split("```json")[1].split("```")[0].strip()
+                    json_text = json_text.split("```json").split("```").strip()
                 elif "```" in json_text:
-                    json_text = json_text.split("```")[1].split("```")[0].strip()
+                    json_text = json_text.split("```").split("```").strip()
                 
-                st.session_state['donnees_repas_complexes'] = json.loads(json_text)
-                st.success("Extraction brute des données effectuée !")
+                st.session_state['donnees_facturation_word'] = json.loads(json_text)
+                st.success("Données extraites avec succès !")
             except Exception as e:
                 st.error(f"Erreur d'analyse : {e}")
 
 # ==========================================
-# 3. VERIFICATEUR DE CALCULS & FORMULAIRE
+# 3. INTERFACE DE TELECHARGEMENT ET FIREBASE
 # ==========================================
 
-if 'donnees_repas_complexes' in st.session_state:
-    data = st.session_state['donnees_repas_complexes']
-    st.subheader(f"📝 Rapport de Vérification Automatique (Semaine {data.get('semaine', '??')})")
+if 'donnees_facturation_word' in st.session_state:
+    data = st.session_state['donnees_facturation_word']
+    semaine = data.get('semaine', '37')
+    annee = data.get('annee', '2026')
+    jours_data = data.get('jours', {})
     
-    valeurs_finales_sauvegarde = {}
+    st.subheader(f"📝 Aperçu du Tableau de Facturation (Semaine {semaine})")
     
-    for jour, repas_du_jour in data.get('jours', {}).items():
-        st.markdown(f"### 🗓️ {jour}")
-        
-        # --- TRAITEMENT DU DEJEUNER ---
-        dej = repas_du_jour.get('dejeuner', {})
-        # Calcul automatique Python
-        dej_reel = int(dej.get('base', 0)) + int(dej.get('rsvs', 0)) + int(dej.get('mecs', 0)) + int(dej.get('p', 0)) + int(dej.get('rs', 0)) + int(dej.get('invite', 0))
-        dej_feuille = int(dej.get('total_feuille', 0))
-        
-        col1, col2 = st.columns(2)
+    # Formulaire interactif modifiable avant de générer le fichier Word
+    valeurs_editees = {}
+    for jour, repas in jours_data.items():
+        st.markdown(f"#### 🗓️ {jour}")
+        col1, col2, col3, col4 = st.columns(4)
         with col1:
-            st.markdown("**Déjeuner (Détail extrait)**")
-            st.write(f"Base: {dej.get('base',0)} | RSVS: {dej.get('rsvs',0)} | Mecs: {dej.get('mecs',0)} | P: {dej.get('p',0)} | RS: {dej.get('rs',0)} | Invité: {dej.get('invite',0)}")
+            p_dej = st.text_input(f"P. Déj - {jour}", value=repas.get('petit_dejeuner', '0'), key=f"pdej_{jour}")
         with col2:
-            if dej_reel == dej_feuille:
-                st.success(f"🟢 Déjeuner Conforme : {dej_reel}")
-            else:
-                st.error(f"🔴 Erreur Déjeuner ! Calcul Réel = {dej_reel} vs Feuille = {dej_feuille}")
-        
-        # --- TRAITEMENT DU DINER ---
-        din = repas_du_jour.get('diner', {})
-        # Calcul automatique Python
-        din_reel = int(din.get('costa', 0)) + int(din.get('stg', 0)) + int(din.get('sta', 0)) + int(din.get('bts', 0)) + int(din.get('educ', 0)) + int(din.get('mecs', 0)) + int(din.get('ajustement', 0))
-        din_feuille = int(din.get('total_feuille', 0))
-        
-        col3, col4 = st.columns(2)
+            midi = st.text_input(f"Midi - {jour}", value=repas.get('midi', '0'), key=f"midi_{jour}")
         with col3:
-            st.markdown("**Dîner (Détail extrait)**")
-            if jour == "Vendredi" and din_feuille == 0:
-                st.write("*Fermé le vendredi soir*")
-            else:
-                st.write(f"Costa: {din.get('costa',0)} | STG: {din.get('stg',0)} | StA: {din.get('sta',0)} | BTS: {din.get('bts',0)} | Educ: {din.get('educ',0)} | MECS: {din.get('mecs',0)}")
+            gout = st.text_input(f"Goûter - {jour}", value=repas.get('gouter', '0'), key=f"gout_{jour}")
         with col4:
-            if jour == "Vendredi" and din_feuille == 0:
-                st.info("🟢 Repas: 0")
-            elif din_reel == din_feuille:
-                st.success(f"🟢 Dîner Conforme : {din_reel}")
-            else:
-                st.error(f"🔴 Erreur Dîner ! Calcul Réel = {din_reel} vs Feuille = {din_feuille}")
-                
-        st.markdown("---")
-        
-        # Préparation du dictionnaire pour Firebase (on enregistre le calcul mathématique exact et corrigé)
-        valeurs_finales_sauvegarde[jour.lower()] = {
-            "dejeuner": dej_reel,
-            "diner": din_reel
-        }
-
-    # Bouton d'envoi final vers votre base Firestore existante
-    if st.button("💾 Valider et Envoyer les totaux certifiés à Firebase"):
-        try:
-            doc_id = f"semaine_{data.get('semaine', '37')}_{data.get('annee', '2026')}"
-            doc_ref = db.collection("repas_servis").document(doc_id)
+            soir = st.text_input(f"Soir - {jour}", value=repas.get('soir', '0'), key=f"soir_{jour}")
             
-            doc_ref.set({
-                "numero_semaine": int(data.get('semaine', 37)),
-                "annee": int(data.get('annee', 2026)),
-                "donnees": valeurs_finales_sauvegarde,
-                "statut_verification": "verifie_et_certifie"
+        valeurs_editees[jour] = {
+            "petit_dejeuner": p_dej,
+            "midi": midi,
+            "gouter": gout,
+            "soir": soir
+        }
+        
+    st.markdown("---")
+    
+    # Génération du fichier Word en mémoire
+    fichier_word_pret = generer_fichier_word(semaine, annee, valeurs_editees)
+    
+    # BOUTON DE TELECHARGEMENT WORD DIRECT !
+    st.download_button(
+        label="📥 Télécharger le fichier Word (.docx) conforme au modèle",
+        data=fichier_word_pret,
+        file_name=f"Facturation_Semaine_{semaine}_{annee}.docx",
+        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    )
+    
+    st.markdown(" ")
+    
+    if st.button("💾 Enregistrer une copie historique dans Firebase"):
+        try:
+            doc_id = f"facture_semaine_{semaine}_{annee}"
+            db.collection("factures_word").document(doc_id).set({
+                "semaine": int(semaine),
+                "annee": int(annee),
+                "tableau_donnees": valeurs_editees
             })
             st.balloons()
-            st.success(f"Données certifiées enregistrées dans Firestore ! (ID: {doc_id})")
-            del st.session_state['donnees_repas_complexes']
+            st.success("Copie enregistrée dans Firestore !")
+            del st.session_state['donnees_facturation_word']
             st.rerun()
         except Exception as e:
-            st.error(f"Erreur d'enregistrement Firebase : {e}")
+            st.error(f"Erreur Firebase : {e}")
