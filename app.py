@@ -57,11 +57,6 @@ if uploaded_file is not None:
     if st.button("🪄 Analyser et extraire les données"):
         with st.spinner("Analyse de l'écriture manuscrite en cours..."):
             try:
-                # Convertir l'image PIL corrigée en octets pour l'envoyer à Gemini
-                img_byte_arr = io.BytesIO()
-                image.save(img_byte_arr, format='PNG')
-                image_bytes = img_byte_arr.getvalue()
-                
                 # Prompt de traitement pour l'IA
                 prompt = """
                 Analyse cette feuille manuscrite intitulée 'EFFECTIF REEL DES REPAS SERVIS'.
@@ -78,13 +73,11 @@ if uploaded_file is not None:
                 }
                 """
                 
-                # Appel à l'IA avec l'image redressée
+                # Appel corrigé : On envoie directement l'objet 'image' PIL
+                # La nouvelle bibliothèque google-genai l'analyse automatiquement.
                 response = client.models.generate_content(
                     model="gemini-2.5-flash",
-                    contents=[
-                        prompt,
-                        {"mime_type": "image/png", "data": image_bytes}
-                    ]
+                    contents=[prompt, image]
                 )
                 
                 # Convertir la réponse texte en dictionnaire Python
@@ -94,6 +87,7 @@ if uploaded_file is not None:
                 
             except Exception as e:
                 st.error(f"Erreur lors de l'analyse : {e}")
+
 
 # ==========================================
 # 3. VALIDATION ET ENREGISTREMENT FIREBASE
