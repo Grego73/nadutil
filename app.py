@@ -134,25 +134,31 @@ if uploaded_file is not None:
                 import base64
                 encoded_img = base64.b64encode(img_byte_arr.getvalue()).decode('utf-8')
                 
-                # Prompt ultra-condensé avec clés courtes pour économiser les jetons
+                # Prompt réajusté pour qualifier les chiffres isolés en fin de ligne
                 prompt = """
                 Analyse la feuille de repas. Extrais tous les jours de la semaine pour MIDI et SOIR.
                 Pour chaque case, donne le total suivi du calcul complet entre parenthèses.
                 Si une case est vide, mets "0". Ne coupe jamais avant vendredi.
+                
+                REGLE CRUCIALE POUR LE SOIR (DÎNER) :
+                Si un calcul se termine par un chiffre seul ou un ajout isolé (exemple: + 2 ou + 3), 
+                ajoute obligatoirement le mot 'invité' ou 'invités' après ce chiffre à l'intérieur des parenthèses.
+                Exemple attendu : "100 (Costa 45 + StG 6 + StA 39 + BTS 2 + Educ 2 + NECS 5 + 2 invités)"
                 
                 Format JSON attendu :
                 {
                   "sem": "37",
                   "dates": "Du 7 au 11 septembre 2026",
                   "jours": {
-                    "Lundi": {"m": "140 (122 + 2 RSVS + 11 Necs + 3 P + 2 RS)", "s": "100 (Costa 45 + StG 6 + StA 39 + BTS 2 + Educ 2 + NECS 5 + 2)"},
-                    "Mardi": {"m": "132 (121 + 2 RSVS + 4 Mecs + 5 P)", "s": "100 (Costa 43 + BTS 02 + Educ 02 + NECS 05 + StG 06 + StA 35 + 3)"},
-                    "Mercredi": {"m": "89 (86 + 2 RSVS + 1 P)", "s": "86 (Costa 40 + BTS 2 + Educ 2 + NECS 4 + StG 5 + StA 33 + 2)"},
+                    "Lundi": {"m": "140 (122 + 2 RSVS + 11 Necs + 3 P + 2 RS)", "s": "100 (Costa 45 + StG 6 + StA 39 + BTS 2 + Educ 2 + NECS 5 + 2 invités)"},
+                    "Mardi": {"m": "132 (121 + 2 RSVS + 4 Mecs + 5 P)", "s": "100 (Costa 43 + BTS 02 + Educ 02 + NECS 05 + StG 06 + StA 35 + 3 invités)"},
+                    "Mercredi": {"m": "89 (86 + 2 RSVS + 1 P)", "s": "86 (Costa 40 + BTS 2 + Educ 2 + NECS 4 + StG 5 + StA 33 + 2 invités)"},
                     "Jeudi": {"m": "138 (122 + 2 RSVS + 8 Necs + 6 P)", "s": "97 (Costa 43 + BTS 02 + Educ 03 + NECS 06 + StG 06 + StA 36 + Invité 01)"},
                     "Vendredi": {"m": "131 (113 + 2 RSVS + 10 Mecs + 5 P + 1 invité)", "s": "0"}
                   }
                 }
                 """
+
                 
                 # Appel API avec max_tokens augmenté pour inclure le vendredi au complet
                 completion = client_groq.chat.completions.create(
