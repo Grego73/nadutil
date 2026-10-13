@@ -68,7 +68,7 @@ def verifier_calcul_formule(chaine_texte):
         return False, 0, 0
 
 # ==========================================
-# 4. FONCTION DE GENERATION DU FICHIER WORD
+# 4. FONCTION DE GENERATION DU FICHIER WORD (AVEC CORRECTION DES ERREURS)
 # ==========================================
 def generer_fichier_word(semaine, date_facturation, donnees_jours):
     doc = Document()
@@ -101,13 +101,28 @@ def generer_fichier_word(semaine, date_facturation, donnees_jours):
         repas = donnees_jours.get(j, {})
         row_cells = table.add_row().cells
         row_cells[0].text = j.upper()
-        row_cells[1].text = str(repas.get('midi', '0'))
-        row_cells[2].text = str(repas.get('soir', '0'))
+        
+        # --- CORRECTION AUTOMATIQUE DU MIDI ---
+        val_midi = str(repas.get('midi', '0')).strip()
+        est_conforme_m, inscrit_m, somme_m = verifier_calcul_formule(val_midi)
+        if not est_conforme_m and somme_m > 0:
+            # Si le calcul est faux, on remplace le faux total par la vraie somme réelle calculée par Python
+            val_midi = re.sub(r"^\d+", str(somme_m), val_midi)
+        row_cells[1].text = val_midi
+        
+        # --- CORRECTION AUTOMATIQUE DU SOIR ---
+        val_soir = str(repas.get('soir', '0')).strip()
+        est_conforme_s, inscrit_s, somme_s = verifier_calcul_formule(val_soir)
+        if not est_conforme_s and somme_s > 0:
+            # Même chose pour le soir, on force l'écriture du vrai chiffre réel
+            val_soir = re.sub(r"^\d+", str(somme_s), val_soir)
+        row_cells[2].text = val_soir
         
     doc_io = io.BytesIO()
     doc.save(doc_io)
     doc_io.seek(0)
     return doc_io
+
 
 # ==========================================
 # 5. INTERFACE UTILISATEUR STREAMLIT
