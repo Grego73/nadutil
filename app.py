@@ -78,10 +78,10 @@ def generer_fichier_word(semaine, date_facturation, donnees_jours):
     table = doc.add_table(rows=1, cols=3)
     table.style = 'Table Grid'
     
-    hdr_cells = table.rows.cells
-    hdr_cells.text = 'JOUR'
-    hdr_cells.text = 'MIDI'
-    hdr_cells.text = 'SOIR'
+    hdr_cells = table.rows[0].cells
+    hdr_cells[0].text = 'JOUR'
+    hdr_cells[1].text = 'MIDI'
+    hdr_cells[2].text = 'SOIR'
     
     for cell in hdr_cells:
         for p in cell.paragraphs:
@@ -91,21 +91,21 @@ def generer_fichier_word(semaine, date_facturation, donnees_jours):
     liste_jours = ["Lundi", "Mardi", "Mercredi", "Jeudi", "Vendredi"]
     for j in liste_jours:
         row_cells = table.add_row().cells
-        row_cells.text = j.upper()
+        row_cells[0].text = j.upper()
         
         # Correction automatique Midi
         val_midi = str(donnees_jours.get(f"midi_{j}", '0')).strip()
         est_conforme_m, inscrit_m, somme_m = verifier_calcul_formule(val_midi)
         if not est_conforme_m and somme_m > 0:
             val_midi = re.sub(r"^\d+", str(somme_m), val_midi)
-        row_cells.text = val_midi
+        row_cells[1].text = val_midi
         
         # Correction automatique Soir
         val_soir = str(donnees_jours.get(f"soir_{j}", '0')).strip()
         est_conforme_s, inscrit_s, somme_s = verifier_calcul_formule(val_soir)
         if not est_conforme_s and somme_s > 0:
             val_soir = re.sub(r"^\d+", str(somme_s), val_soir)
-        row_cells.text = val_soir
+        row_cells[2].text = val_soir
         
     doc_io = io.BytesIO()
     doc.save(doc_io)
@@ -133,7 +133,6 @@ if uploaded_file is not None:
                 import base64
                 encoded_img = base64.b64encode(img_byte_arr.getvalue()).decode('utf-8')
                 
-                # Prompt avec l'ajout automatique de la mention "invités"
                 prompt = """
                 Analyse la feuille de repas. Extrais tous les jours de la semaine pour MIDI et SOIR.
                 Pour chaque case, donne le total suivi du calcul complet entre parenthèses.
@@ -162,14 +161,13 @@ if uploaded_file is not None:
                     messages=[{"role": "user", "content": [{"type": "text", "text": prompt}, {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{encoded_img}"}}]}],
                     model="qwen/qwen3.8-27b",
                     temperature=0.0,
-                    max_tokens=500,  # Conservé à 500 pour avoir le Vendredi complet
+                    max_tokens=500,  
                     response_format={"type": "json_object"}
                 )
                 
                 texte_ia = completion.choices[0].message.content.strip()
                 brut_data = json.loads(texte_ia)
                 
-                # Injection directe des résultats de l'IA dans l'état de la session (st.session_state)
                 st.session_state["semaine_num"] = brut_data.get("sem", "37")
                 st.session_state["dates_num"] = brut_data.get("dates", "")
                 
@@ -184,7 +182,7 @@ if uploaded_file is not None:
                 st.error(f"Erreur d'analyse. Détail : {e}")
 
 # ==========================================
-# 6. GRILLE D'AUDIT INTERACTIVE ET CLIQUEABLE
+# 6. GRILLE D'AUDIT INTERACTIVE ET ENREGISTREMENT WORD
 # ==========================================
 if 'analyse_reussie' in st.session_state:
     sem = st.session_state.get("semaine_num", "37")
@@ -195,8 +193,6 @@ if 'analyse_reussie' in st.session_state:
     st.info(f"📅 Période : {dates}")
     
     liste_jours = ["Lundi", "Mardi", "Mercredi", "Jeudi", "Vendredi"]
-    
-    # On crée une structure pour capturer les valeurs éditées en temps réel
     valeurs_formulaire = {}
     
     for j in liste_jours:
@@ -204,7 +200,6 @@ if 'analyse_reussie' in st.session_state:
         col1, col2 = st.columns(2)
         
         with col1:
-            # La case récupère sa valeur depuis la session et l'enregistre en temps réel au clic/saisie
             val_midi = st.text_input(f"Formule MIDI - {j}", key=f"midi_{j}")
             valeurs_formulaire[f"midi_{j}"] = val_midi
             
@@ -232,13 +227,13 @@ if 'analyse_reussie' in st.session_state:
         
     st.markdown("---")
     
-# 7. EXPORTATION DU DOCUMENT CERTIFIÉ AVEC VOS MODIFICATIONS
-fichier_docx = generer_fichier_word(sem, dates, valeurs_formulaire)
-
-st.download_button(
-    label="📥 Générer et Télécharger le fichier Word (.docx) avec vos modifications",
-    data=fichier_docx,
-    file_name=f"Facturation_Semaine_{sem}.docx",
-    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-    use_container_width=True
-)
+    # 7. EXPORTATION ET BOUTON DE TÉLÉCHARGEMENT DIRECT
+    fichier_docx = generer_fichier_word(sem, dates, valeurs_formulaire)
+    
+    st.download_button(
+        label="📥 Générer et Télécharger le fichier Word (.docx) avec vos modifications",
+        data=fichier_docx,
+        file_name=f"Facturation_Semaine_{sem}.docx",
+        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        use_container_width=True
+    )
