@@ -10,11 +10,11 @@ from docx import Document  # Génération Word
 from docx.shared import Pt
 
 # ==========================================
-# 1. CONFIGURATION DE LA PAGE (TAILLE MAX DE L'ECRAN)
+# 1. CONFIGURATION DE LA PAGE
 # ==========================================
 st.set_page_config(
     page_title="Générateur & Vérificateur de Facturation",
-    layout="wide",  # Force l'affichage sur toute la largeur de l'écran
+    layout="wide",  
     initial_sidebar_state="collapsed"
 )
 
@@ -78,10 +78,10 @@ def generer_fichier_word(semaine, date_facturation, donnees_jours):
     table = doc.add_table(rows=1, cols=3)
     table.style = 'Table Grid'
     
-    hdr_cells = table.rows[0].cells
-    hdr_cells[0].text = 'JOUR'
-    hdr_cells[1].text = 'MIDI'
-    hdr_cells[2].text = 'SOIR'
+    hdr_cells = table.rows.cells
+    hdr_cells.text = 'JOUR'
+    hdr_cells.text = 'MIDI'
+    hdr_cells.text = 'SOIR'
     
     for cell in hdr_cells:
         for p in cell.paragraphs:
@@ -90,23 +90,22 @@ def generer_fichier_word(semaine, date_facturation, donnees_jours):
                 
     liste_jours = ["Lundi", "Mardi", "Mercredi", "Jeudi", "Vendredi"]
     for j in liste_jours:
-        repas = donnees_jours.get(j, {})
         row_cells = table.add_row().cells
-        row_cells[0].text = j.upper()
+        row_cells.text = j.upper()
         
         # Correction automatique Midi
-        val_midi = str(repas.get('midi', '0')).strip()
+        val_midi = str(donnees_jours.get(f"midi_{j}", '0')).strip()
         est_conforme_m, inscrit_m, somme_m = verifier_calcul_formule(val_midi)
         if not est_conforme_m and somme_m > 0:
             val_midi = re.sub(r"^\d+", str(somme_m), val_midi)
-        row_cells[1].text = val_midi
+        row_cells.text = val_midi
         
         # Correction automatique Soir
-        val_soir = str(repas.get('soir', '0')).strip()
+        val_soir = str(donnees_jours.get(f"soir_{j}", '0')).strip()
         est_conforme_s, inscrit_s, somme_s = verifier_calcul_formule(val_soir)
         if not est_conforme_s and somme_s > 0:
             val_soir = re.sub(r"^\d+", str(somme_s), val_soir)
-        row_cells[2].text = val_soir
+        row_cells.text = val_soir
         
     doc_io = io.BytesIO()
     doc.save(doc_io)
@@ -134,7 +133,7 @@ if uploaded_file is not None:
                 import base64
                 encoded_img = base64.b64encode(img_byte_arr.getvalue()).decode('utf-8')
                 
-                # Prompt réajusté pour qualifier les chiffres isolés en fin de ligne
+                # Prompt avec l'ajout automatique de la mention "invités"
                 prompt = """
                 Analyse la feuille de repas. Extrais tous les jours de la semaine pour MIDI et SOIR.
                 Pour chaque case, donne le total suivi du calcul complet entre parenthèses.
@@ -142,7 +141,7 @@ if uploaded_file is not None:
                 
                 REGLE CRUCIALE POUR LE SOIR (DÎNER) :
                 Si un calcul se termine par un chiffre seul ou un ajout isolé (exemple: + 2 ou + 3), 
-                ajoute obligatoirement le mot 'invité' ou 'invités' après ce chiffre à l'intérieur des parenthèses.
+                ajoute obligatoirement le mot 'invités' après ce chiffre à l'intérieur des parenthèses.
                 Exemple attendu : "100 (Costa 45 + StG 6 + StA 39 + BTS 2 + Educ 2 + NECS 5 + 2 invités)"
                 
                 Format JSON attendu :
@@ -158,92 +157,88 @@ if uploaded_file is not None:
                   }
                 }
                 """
-
                 
-                # Appel API avec max_tokens augmenté pour inclure le vendredi au complet
                 completion = client_groq.chat.completions.create(
                     messages=[{"role": "user", "content": [{"type": "text", "text": prompt}, {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{encoded_img}"}}]}],
                     model="qwen/qwen3.8-27b",
                     temperature=0.0,
-                    max_tokens=500,  # <--- MODIFIEZ CETTE VALEUR ICI (Passez de 400 à 500)
+                    max_tokens=500,  # Conservé à 500 pour avoir le Vendredi complet
                     response_format={"type": "json_object"}
                 )
                 
-                # CORRECTION COMPLÈTE ICI : Ajout du [0] pour éviter l'erreur de liste
                 texte_ia = completion.choices[0].message.content.strip()
-                
                 brut_data = json.loads(texte_ia)
                 
-                # Reconstruction des clés longues pour l'interface
-                structure_propre = {
-                    "semaine": brut_data.get("sem", "37"),
-                    "dates": brut_data.get("dates", ""),
-                    "jours": {}
-                }
+                # Injection directe des résultats de l'IA dans l'état de la session (st.session_state)
+                st.session_state["semaine_num"] = brut_data.get("sem", "37")
+                st.session_state["dates_num"] = brut_data.get("dates", "")
                 
                 for jour, valeurs in brut_data.get("jours", {}).items():
-                    structure_propre["jours"][jour] = {
-                        "midi": valeurs.get("m", "0"),
-                        "soir": valeurs.get("s", "0")
-                    }
+                    st.session_state[f"midi_{jour}"] = valeurs.get("m", "0")
+                    st.session_state[f"soir_{jour}"] = valeurs.get("s", "0")
                 
-                st.session_state['repas_extraits'] = structure_propre
-                st.success("Données de la semaine complète extraites avec succès !")
+                st.session_state['analyse_reussie'] = True
+                st.success("Données de la semaine extraites ! Vous pouvez maintenant cliquer sur les cases pour les modifier.")
                 
             except Exception as e:
                 st.error(f"Erreur d'analyse. Détail : {e}")
 
 # ==========================================
-# 6. GRILLE D'AUDIT ET VOYANTS DE CONFORMITÉ
+# 6. GRILLE D'AUDIT INTERACTIVE ET CLIQUEABLE
 # ==========================================
-if 'repas_extraits' in st.session_state:
-    res = st.session_state['repas_extraits']
-    sem = res.get('semaine', '37')
-    dates = res.get('dates', 'Du 7 au 11 septembre 2026')
-    jours_dict = res.get('jours', {})
+if 'analyse_reussie' in st.session_state:
+    sem = st.session_state.get("semaine_num", "37")
+    dates = st.session_state.get("dates_num", "")
     
     st.markdown("---")
-    st.subheader(f"📝 Grille d'Audit et de Correction (Semaine {sem})")
+    st.subheader(f"📝 Grille de Révision Modifiable (Semaine {sem})")
     st.info(f"📅 Période : {dates}")
     
-    donnees_finales = {}
+    liste_jours = ["Lundi", "Mardi", "Mercredi", "Jeudi", "Vendredi"]
     
-    for j in ["Lundi", "Mardi", "Mercredi", "Jeudi", "Vendredi"]:
-        repas_j = jours_dict.get(j, {})
+    # On crée une structure pour capturer les valeurs éditées en temps réel
+    valeurs_formulaire = {}
+    
+    for j in liste_jours:
         st.markdown(f"### 🗓️ {j.upper()}")
-        
         col1, col2 = st.columns(2)
         
         with col1:
-            val_midi = st.text_input(f"Formule MIDI - {j}", value=repas_j.get('midi', '0'), key=f"midi_{j}")
+            # La case récupère sa valeur depuis la session et l'enregistre en temps réel au clic/saisie
+            val_midi = st.text_input(f"Formule MIDI - {j}", key=f"midi_{j}")
+            valeurs_formulaire[f"midi_{j}"] = val_midi
+            
             est_conforme_m, inscrit_m, somme_m = verifier_calcul_formule(val_midi)
             if val_midi != "0":
                 if est_conforme_m:
                     st.success(f"🟢 Addition Conforme (Somme = {somme_m})")
                 else:
-                    st.error(f"🔴 Erreur d'Addition sur la feuille ! Écrit = {inscrit_m} vs Somme Réelle = {somme_m}")
+                    st.error(f"🔴 Erreur détectée ! Écrit = {inscrit_m} vs Somme Réelle = {somme_m}")
                     
         with col2:
-            val_soir = st.text_input(f"Formule SOIR - {j}", value=repas_j.get('soir', '0'), key=f"soir_{j}")
+            val_soir = st.text_input(f"Formule SOIR - {j}", key=f"soir_{j}")
+            valeurs_formulaire[f"soir_{j}"] = val_soir
+            
             est_conforme_s, inscrit_s, somme_s = verifier_calcul_formule(val_soir)
             if val_soir != "0":
                 if est_conforme_s:
                     st.success(f"🟢 Addition Conforme (Somme = {somme_s})")
                 else:
-                    st.error(f"🔴 Erreur d'Addition sur la feuille ! Écrit = {inscrit_s} vs Somme Réelle = {somme_s}")
+                    st.error(f"🔴 Erreur détectée ! Écrit = {inscrit_s} vs Somme Réelle = {somme_s}")
             elif j == "Vendredi":
                 st.info("🟢 Établissement fermé le vendredi soir (0 repas)")
                 
-        donnees_finales[j] = {"midi": val_midi, "soir": val_soir}
         st.markdown(" ")
         
     st.markdown("---")
     
-    fichier_docx = generer_fichier_word(sem, dates, donnees_finales)
-    st.download_button(
-        label="📥 Générer et Télécharger le fichier Word (.docx) de Facturation Vérifié",
-        data=fichier_docx,
-        file_name=f"Facturation_Semaine_{sem}.docx",
-        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        use_container_width=True
-    )
+# 7. EXPORTATION DU DOCUMENT CERTIFIÉ AVEC VOS MODIFICATIONS
+fichier_docx = generer_fichier_word(sem, dates, valeurs_formulaire)
+
+st.download_button(
+    label="📥 Générer et Télécharger le fichier Word (.docx) avec vos modifications",
+    data=fichier_docx,
+    file_name=f"Facturation_Semaine_{sem}.docx",
+    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    use_container_width=True
+)
