@@ -31,7 +31,6 @@ texte_extrait = ""
 
 if fichier_image is not None:
     image_brute = Image.open(fichier_image)
-    # Redressement automatique de l'image
     try:
         image = ImageOps.exif_transpose(image_brute)
     except Exception:
@@ -70,43 +69,56 @@ if texte_extrait.strip():
         if not ligne_nettoyee or ligne_nettoyee.startswith(",,,,"):
             continue
             
-        # Détection de la classe
+        # Détection de la classe / section
         if any(c in ligne_nettoyee for c in ["4ème", "3ème", "CAPA", "2DE", "BAC PRO", "TERM", "BTS", "Ste ", "St ", "SECONDES", "PREMIERES", "TERMINALES"]):
-            classe_actuelle = ligne_nettoyee.replace(",", "").strip()
+            classe_actuelle = ligne_nettoyee.replace(",", " ").strip()
             continue
             
-        # Ignorer les lignes de structure de l'en-tête
+        # Ignorer les lignes de structure de l'en-tête ou totaux
         if "NOM" in ligne_nettoyee or "EFFECTIF" in ligne_nettoyee or "INTERNES" in ligne_nettoyee or "COSTA" in ligne_nettoyee:
             continue
             
-        elements = [e.strip() for e in ligne_nettoyee.split(",")]
-        
-        # Validation d'une ligne élève ou personnel
-        if len(elements) >= 3 and any(r in elements for r in ["D", "P", "D/F", "APP"]):
-            nom = elements[0]
-            prenom = elements[1]
-            regime = elements[2]
+        # Découpage intelligent (gère les virgules ou les espaces multiples dus à l'OCR)
+        if "," in ligne_nettoyee:
+            elements = [e.strip() for e in ligne_nettoyee.split(",")]
+        else:
+            elements = [e.strip() for e in ligne_nettoyee.split() if e.strip()]
             
-            repas_existants = elements[3:13]
+        # Validation d'une ligne élève : Recherche d'un indicateur de régime (D, P, APP)
+        regime_trouve = None
+        idx_regime = -1
+        for idx, r in enumerate(elements):
+            if r in ["D", "P", "D/F", "APP"]:
+                regime_trouve = r
+                idx_regime = idx
+                break
+                
+        if regime_trouve and idx_regime >= 2:
+            nom = " ".join(elements[:idx_regime-1]) if idx_regime > 2 else elements[0]
+            prenom = elements[idx_regime-1]
+            regime = regime_trouve
+            
+            # Extraction des notes de présences spécifiques (PN, EXC, ABS)
+            repas_existants = elements[idx_regime+1:idx_regime+11]
             while len(repas_existants) < 10:
                 repas_existants.append("")
                 
             repas_calcules = []
-            for idx, case in enumerate(repas_existants):
-                est_midi = (idx % 2 == 0)
+            for idx_rep, case in enumerate(repas_existants):
+                est_midi = (idx_rep % 2 == 0)
                 
-                # Conserver les statuts spécifiques
+                # Conserver les statuts spécifiques de la feuille
                 if case in ["PN", "EXC", "ABS", "REPAS"]:
                     repas_calcules.append(case)
-                # Attribution automatique des coches réglementaires X
+                # Attribution automatique des coches X
                 elif "P" in regime:
-                    repas_calcules.append("X")  # Pensionnaire mange Midi et Soir
+                    repas_calcules.append("X")  # Pensionnaire / Interne mange Midi et Soir
                 elif "D" in regime and est_midi:
                     repas_calcules.append("X")  # Demi-pensionnaire mange uniquement le Midi
                 else:
                     repas_calcules.append("")
             
-            # Structuration finale
+            # Structuration finale de l'élève
             ligne_eleve = {"Classe / Section": classe_actuelle, "Nom": nom, "Prénom": prenom, "Régime": regime}
             for j, jour_label in enumerate(jours_colonnes):
                 ligne_eleve[jour_label] = repas_calcules[j]
@@ -120,7 +132,7 @@ if texte_extrait.strip():
                 except Exception:
                     pass
 
-    # 5. CONSTRUCTION VISUELLE DU TABLEAU ET EXPORTATION EXCEL
+    # 5. CONSTRUCTION DU TABLEAU EXCEL
     if donnees_propres:
         df = pd.DataFrame(donnees_propres)
         st.success("🟢 Analyse terminée ! Voici le tableau complet généré automatiquement :")
@@ -130,9 +142,9 @@ if texte_extrait.strip():
         wb = openpyxl.Workbook()
         ws = wb.active
         ws.title = "Suivi Présence"
-        ws.views.sheetView.showGridLines = True  # Forcer l'affichage de la grille
+        ws.views.sheetView.showGridLines = True
         
-        # Titres
+        # Titres de la feuille
         ws["A1"] = "LYCEE COSTA DE BEAUREGARD"
         ws["A1"].font = Font(name="Arial", size=14, bold=True, color="1F4E78")
         ws.merge_cells("A1:N1")
@@ -141,13 +153,11 @@ if texte_extrait.strip():
         ws["A2"].font = Font(name="Arial", size=11, italic=True, color="595959")
         ws.merge_cells("A2:N2")
         
-        # En-têtes fixes fusionnés verticalement
         headers_principaux = ["Classe / Section", "Nom", "Prénom", "Régime"]
         for col_num, header in enumerate(headers_principaux, 1):
             ws.cell(row=4, column=col_num, value=header)
             ws.merge_cells(start_row=4, start_column=col_num, end_row=5, end_column=col_num)
             
-        # En-têtes des jours fusionnés horizontalement
         jours_header = ["LUNDI", "MARDI", "MERCREDI", "JEUDI", "VENDREDI"]
         current_col = 5
         for jour in jours_header:
@@ -157,13 +167,12 @@ if texte_extrait.strip():
             ws.cell(row=5, column=current_col+1, value="Soir")
             current_col += 2
             
-        # Style des en-têtes (Lignes 4 et 5)
         fill_header = PatternFill(start_color="D9E1F2", end_color="D9E1F2", fill_type="solid")
         font_header = Font(name="Arial", size=10, bold=True)
         thin_border = Border(left=Side(style='thin', color='A6A6A6'), right=Side(style='thin', color='A6A6A6'), top=Side(style='thin', color='A6A6A6'), bottom=Side(style='thin', color='A6A6A6'))
         
-        # LA LIGNE CORRIGÉE ICI : Application du style sur les deux lignes d'en-tête (4 et 5)
-        for r in [4, 5]:
+        # Style des en-têtes
+        for r in:
             for c in range(1, 15):
                 cell = ws.cell(row=r, column=c)
                 cell.fill = fill_header
@@ -171,7 +180,7 @@ if texte_extrait.strip():
                 cell.alignment = Alignment(horizontal="center", vertical="center")
                 cell.border = thin_border
                 
-        # Écriture des élèves et raccordement des styles
+        # Écriture des données
         for index, row in df.iterrows():
             row_data = [row["Classe / Section"], row["Nom"], row["Prénom"], row["Régime"], row["LUNDI_Midi"], row["LUNDI_Soir"], row["MARDI_Midi"], row["MARDI_Soir"], row["MERCREDI_Midi"], row["MERCREDI_Soir"], row["JEUDI_Midi"], row["JEUDI_Soir"], row["VENDREDI_Midi"], row["VENDREDI_Soir"]]
             ws.append(row_data)
@@ -185,13 +194,11 @@ if texte_extrait.strip():
                     if cell.value in ["PN", "EXC", "ABS"]:
                         cell.font = Font(name="Arial", size=10, bold=True)
                         
-        # Redimensionnement automatique des largeurs de colonnes
         for col in ws.columns:
             max_len = max(len(str(cell.value or '')) for cell in col)
             col_letter = openpyxl.utils.get_column_letter(col.column)
             ws.column_dimensions[col_letter].width = max(max_len + 3, 10)
             
-        # Conversion du classeur Excel en flux téléchargeable
         buffer = io.BytesIO()
         wb.save(buffer)
         buffer.seek(0)
@@ -204,4 +211,4 @@ if texte_extrait.strip():
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
     else:
-        st.warning("⚠️ Aucun élève valide détecté. Vérifiez la structure de votre texte.")
+        st.warning("⚠️ Aucun élève valide détecté. Vérifiez la structure de votre texte ou utilisez l'Option B pour copier-coller votre liste.")
