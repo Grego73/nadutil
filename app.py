@@ -82,8 +82,8 @@ if uploaded_file is not None:
                             ],
                         }
                     ],
-                    model="llama-3.2-11b-vision-preview",
-                    temperature=0.0,  # Strict pour les chiffres
+                    model="qwen/qwen3.8-27b",  # <--- METTEZ À JOUR CETTE LIGNE
+                    temperature=0.0,
                 )
                 
                 # Récupération du résultat texte
