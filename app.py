@@ -37,29 +37,21 @@ db = firestore.client()
 # 3. FONCTION DE VERIFICATION TECHNIQUE DES CALCULS
 # ==========================================
 def verifier_calcul_formule(chaine_texte):
-    """
-    Analyse une chaîne comme '140 (122 + 2 RSVS + 11 Necs + 3 P)' 
-    et vérifie si la somme à l'intérieur des parenthèses est égale au total affiché.
-    """
     chaine_texte = str(chaine_texte).strip()
     if not chaine_texte or chaine_texte == "0":
         return True, 0, 0
         
     try:
-        # Extraire le total écrit au début
         total_ecrit_match = re.match(r"^(\d+)", chaine_texte)
         if not total_ecrit_match:
             return False, 0, 0
         total_ecrit = int(total_ecrit_match.group(1))
         
-        # Extraire tout ce qui est à l'intérieur des parenthèses (...)
         parentheses_content = re.search(r"\((.*?)\)", chaine_texte)
         if not parentheses_content:
-            # S'il n'y a pas de parenthèses (ex: juste écrit "86"), on considère que c'est juste
             return True, total_ecrit, total_ecrit
             
         formule = parentheses_content.group(1)
-        # Extraire uniquement les nombres présents dans l'addition
         nombres = [int(n) for n in re.findall(r"\d+", formule)]
         somme_reelle = sum(nombres)
         
@@ -68,7 +60,7 @@ def verifier_calcul_formule(chaine_texte):
         return False, 0, 0
 
 # ==========================================
-# 4. FONCTION DE GENERATION DU FICHIER WORD (AVEC CORRECTION DES ERREURS)
+# 4. FONCTION DE GENERATION DU FICHIER WORD
 # ==========================================
 def generer_fichier_word(semaine, date_facturation, donnees_jours):
     doc = Document()
@@ -102,19 +94,17 @@ def generer_fichier_word(semaine, date_facturation, donnees_jours):
         row_cells = table.add_row().cells
         row_cells[0].text = j.upper()
         
-        # --- CORRECTION AUTOMATIQUE DU MIDI ---
+        # Correction automatique Midi
         val_midi = str(repas.get('midi', '0')).strip()
         est_conforme_m, inscrit_m, somme_m = verifier_calcul_formule(val_midi)
         if not est_conforme_m and somme_m > 0:
-            # Si le calcul est faux, on remplace le faux total par la vraie somme réelle calculée par Python
             val_midi = re.sub(r"^\d+", str(somme_m), val_midi)
         row_cells[1].text = val_midi
         
-        # --- CORRECTION AUTOMATIQUE DU SOIR ---
+        # Correction automatique Soir
         val_soir = str(repas.get('soir', '0')).strip()
         est_conforme_s, inscrit_s, somme_s = verifier_calcul_formule(val_soir)
         if not est_conforme_s and somme_s > 0:
-            # Même chose pour le soir, on force l'écriture du vrai chiffre réel
             val_soir = re.sub(r"^\d+", str(somme_s), val_soir)
         row_cells[2].text = val_soir
         
@@ -123,12 +113,11 @@ def generer_fichier_word(semaine, date_facturation, donnees_jours):
     doc_io.seek(0)
     return doc_io
 
-
 # ==========================================
 # 5. INTERFACE UTILISATEUR STREAMLIT
 # ==========================================
 st.title("📊 Numérisation, Audit de Calculs & Export Word")
-st.write("Importez la photo de votre feuille pour auditer les additions et générer le document de facturation.")
+st.write("Importez la photo de votre feuille pour auditer les additions.")
 
 uploaded_file = st.file_uploader("Choisir une image...", type=["jpg", "jpeg", "png"])
 
@@ -138,20 +127,20 @@ if uploaded_file is not None:
     st.image(image, caption="Feuille importée", width=400)
     
     if st.button("🪄 Lancer l'analyse et la vérification des additions"):
-        with st.spinner("L'IA décrypte l'écriture manuscrite et extrait les formules de calcul..."):
+        with st.spinner("L'IA décrypte l'écriture manuscrite et extrait les formules..."):
             try:
                 img_byte_arr = io.BytesIO()
                 image.save(img_byte_arr, format='JPEG')
                 import base64
                 encoded_img = base64.b64encode(img_byte_arr.getvalue()).decode('utf-8')
                 
-                # Prompt ultra-optimisé (Clés courtes pour économiser les jetons et lire TOUTE la semaine)
+                # Prompt ultra-condensé avec clés courtes pour économiser les jetons
                 prompt = """
-                Analyse la feuille de repas. Extrais TOUS les jours (Lundi au Vendredi) pour MIDI et SOIR.
+                Analyse la feuille de repas. Extrais tous les jours de la semaine pour MIDI et SOIR.
                 Pour chaque case, donne le total suivi du calcul complet entre parenthèses.
-                Sois très précis sur les chiffres écrits. Si une case est vide, mets "0".
+                Si une case est vide, mets "0". Ne coupe jamais avant vendredi.
                 
-                Format JSON strict (ne coupe pas avant vendredi) :
+                Format JSON attendu :
                 {
                   "sem": "37",
                   "dates": "Du 7 au 11 septembre 2026",
@@ -165,26 +154,21 @@ if uploaded_file is not None:
                 }
                 """
                 
+                # Appel API corrigé avec choices[0] et format JSON natif
                 completion = client_groq.chat.completions.create(
-                    messages=[{
-                        "role": "user",
-                        "content": [
-                            {"type": "text", "text": prompt},
-                            {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{encoded_img}"}}
-                        ]
-                    }],
+                    messages=[{"role": "user", "content": [{"type": "text", "text": prompt}, {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{encoded_img}"}}]}],
                     model="qwen/qwen3.8-27b",
                     temperature=0.0,
-                    max_tokens=350,  # Augmenté légèrement pour laisser la place de finir le Vendredi
+                    max_tokens=400,
                     response_format={"type": "json_object"}
                 )
                 
-                texte_ia = completion.choices.message.content.strip()
+                # CORRECTION COMPLÈTE ICI : Ajout du [0] pour éviter l'erreur de liste
+                texte_ia = completion.choices[0].message.content.strip()
                 
-                # Conversion du JSON
                 brut_data = json.loads(texte_ia)
                 
-                # Reconstruction automatique pour l'affichage (on remet les clés longues attendues par votre interface)
+                # Reconstruction des clés longues pour l'interface
                 structure_propre = {
                     "semaine": brut_data.get("sem", "37"),
                     "dates": brut_data.get("dates", ""),
@@ -202,8 +186,6 @@ if uploaded_file is not None:
                 
             except Exception as e:
                 st.error(f"Erreur d'analyse. Détail : {e}")
-
-
 
 # ==========================================
 # 6. GRILLE D'AUDIT ET VOYANTS DE CONFORMITÉ
@@ -226,7 +208,6 @@ if 'repas_extraits' in st.session_state:
         
         col1, col2 = st.columns(2)
         
-        # --- TRAITEMENT DU MIDI ---
         with col1:
             val_midi = st.text_input(f"Formule MIDI - {j}", value=repas_j.get('midi', '0'), key=f"midi_{j}")
             est_conforme_m, inscrit_m, somme_m = verifier_calcul_formule(val_midi)
@@ -236,7 +217,6 @@ if 'repas_extraits' in st.session_state:
                 else:
                     st.error(f"🔴 Erreur d'Addition sur la feuille ! Écrit = {inscrit_m} vs Somme Réelle = {somme_m}")
                     
-        # --- TRAITEMENT DU SOIR ---
         with col2:
             val_soir = st.text_input(f"Formule SOIR - {j}", value=repas_j.get('soir', '0'), key=f"soir_{j}")
             est_conforme_s, inscrit_s, somme_s = verifier_calcul_formule(val_soir)
@@ -253,7 +233,6 @@ if 'repas_extraits' in st.session_state:
         
     st.markdown("---")
     
-    # Bouton de téléchargement Word
     fichier_docx = generer_fichier_word(sem, dates, donnees_finales)
     st.download_button(
         label="📥 Générer et Télécharger le fichier Word (.docx) de Facturation Vérifié",
