@@ -145,46 +145,51 @@ if uploaded_file is not None:
                 import base64
                 encoded_img = base64.b64encode(img_byte_arr.getvalue()).decode('utf-8')
                 
+                # Prompt ultra-court et condensé pour économiser les jetons (OTPM)
                 prompt = """
-                Analyse cette feuille de repas et extrais les données de facturation pour le 'MIDI' (Déjeuner) et le 'SOIR' (Dîner).
-                Ne confonds jamais le Midi et le Soir.
+                Analyse la feuille de repas. Extrais les données pour MIDI et SOIR.
+                Pour chaque case, donne le total suivi du calcul complet entre parenthèses.
+                Si une case est raturée ou fausse, conserve la formule textuelle exacte écrite par l'humain.
+                Mets "0" si c'est vide.
                 
-                Pour chaque case, écris le total validé suivi du calcul détaillé trouvé sur le document entre parenthèses.
-                Exemple pour le Midi : "140 (122 + 2 RSVS + 11 Necs + 3 P + 2 RS)"
-                Exemple pour le Soir : "100 (Costa 45 + StG 6 + StA 39 + BTS 2 + Educ 2 + NECS 5 + 2)"
-                Note bien l'intégralité des additions manuscrites pour le Soir. Si une case est vide, mets "0".
-                
-                Réponds UNIQUEMENT avec un code JSON respectant exactement cette structure, sans texte avant ni après, et sans balises de code :
+                Format de réponse attendu (JSON strict uniquement) :
                 {
                   "semaine": "37",
                   "dates": "Du 7 au 11 septembre 2026",
                   "jours": {
                     "Lundi": {"midi": "140 (122 + 2 RSVS + 11 Necs + 3 P + 2 RS)", "soir": "100 (Costa 45 + StG 6 + StA 39 + BTS 2 + Educ 2 + NECS 5 + 2)"},
-                    "Mardi": {"midi": "132 (121 + 2 RSVS + 4 Mecs + 5 P)", "soir": "100 (Costa 43 + BTS 02 + Educ 02 + NECS 05 + StG 06 + StA 35 + 3)"},
-                    "Mercredi": {"midi": "89 (86 + 2 RSVS + 1 P)", "soir": "86 (Costa 40 + BTS 2 + Educ 2 + NECS 4 + StG 5 + StA 33 + 2)"},
-                    "Jeudi": {"midi": "138 (122 + 2 RSVS + 8 Necs + 6 P)", "soir": "97 (Costa 43 + BTS 02 + Educ 03 + NECS 06 + StG 06 + StA 36 + Invité 01)"},
-                    "Vendredi": {"midi": "131 (113 + 2 RSVS + 10 Mecs + 5 P + 1 invité)", "soir": "0"}
+                    "Mardi": {"midi": "...", "soir": "..."},
+                    "Mercredi": {"midi": "...", "soir": "..."},
+                    "Jeudi": {"midi": "...", "soir": "..."},
+                    "Vendredi": {"midi": "...", "soir": "0"}
                   }
                 }
                 """
                 
+                # Appel API optimisé avec format JSON forcé et max_tokens très bas
                 completion = client_groq.chat.completions.create(
-                    messages=[{"role": "user", "content": [{"type": "text", "text": prompt}, {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{encoded_img}"}}]}],
+                    messages=[{
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": prompt},
+                            {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{encoded_img}"}}
+                        ]
+                    }],
                     model="qwen/qwen3.8-27b",
-                    temperature=0.0
+                    temperature=0.0,
+                    max_tokens=250,  # Bridage strict accepté par les limites gratuites
+                    response_format={"type": "json_object"}  # Force Groq à envoyer du JSON natif propre
                 )
                 
                 texte_ia = completion.choices[0].message.content.strip()
-                if "```json" in texte_ia:
-                    texte_ia = texte_ia.split("```json")[1].split("```")[0].strip()
-                elif "```" in texte_ia:
-                    texte_ia = texte_ia.split("```")[1].split("```")[0].strip()
                 
+                # Conversion directe en dictionnaire Python (plus besoin de splits compliqués !)
                 st.session_state['repas_extraits'] = json.loads(texte_ia)
                 st.success("Données extraites avec succès !")
                 
             except Exception as e:
                 st.error(f"Erreur d'analyse. Détail : {e}")
+
 
 # ==========================================
 # 6. GRILLE D'AUDIT ET VOYANTS DE CONFORMITÉ
