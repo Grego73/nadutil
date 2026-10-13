@@ -72,12 +72,23 @@ if uploaded_file is not None:
                   }
                 }
                 """
-                # Utilisation du modèle 2.0 en alternative pour contourner la surcharge du serveur
-                response = client.models.generate_content(
-                    model="gemini-2.0-flash",  # <--- Changez la version ici
-                    contents=[prompt, image]
-                )
-
+                
+                import time
+                
+                # Tentative d'appel avec boucle de sécurité si le serveur est surchargé (Erreur 503)
+                for tentative in range(3):
+                    try:
+                        response = client.models.generate_content(
+                            model="gemini-3.8-flash",  # Le seul modèle officiel disponible
+                            contents=[prompt, image]
+                        )
+                        break  # Si ça réussit, on sort de la boucle
+                    except Exception as e:
+                        if "503" in str(e) and tentative < 2:
+                            time.sleep(2)  # On attend 2 secondes avant de réessayer
+                            continue
+                        raise e  # Si c'est une autre erreur ou la dernière tentative, on bloque
+                
                 # Convertir la réponse texte en dictionnaire Python
                 donnees_extraites = json.loads(response.text.strip())
                 st.session_state['donnees_repas'] = donnees_extraites
@@ -85,6 +96,7 @@ if uploaded_file is not None:
                 
             except Exception as e:
                 st.error(f"Erreur lors de l'analyse : {e}")
+
 
 
 # ==========================================
