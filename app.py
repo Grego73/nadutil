@@ -135,14 +135,20 @@ if uploaded_file is not None:
                     temperature=0.0
                 )
                 
-                json_text = chat_completion.choices.message.content.strip()
-                if "```json" in json_text:
-                    json_text = json_text.split("```json").split("```").strip()
-                elif "```" in json_text:
-                    json_text = json_text.split("```").split("```").strip()
+                # 1. Récupération brute de la réponse textuelle de Groq (première alternative de la liste)
+                result_text = chat_completion.choices[0].message.content.strip()
                 
-                st.session_state['donnees_facturation_word'] = json.loads(json_text)
+                # 2. Nettoyage sécurisé du format JSON (sans enchaîner de split invalides)
+                if "```json" in result_text:
+                    result_text = result_text.split("```json")[1].split("```")[0].strip()
+                elif "```" in result_text:
+                    result_text = result_text.split("```")[1].split("```")[0].strip()
+                
+                # 3. Conversion en dictionnaire Python pour générer le Word
+                donnees_extraites = json.loads(result_text)
+                st.session_state['donnees_facturation_word'] = donnees_extraites
                 st.success("Données extraites avec succès !")
+                
             except Exception as e:
                 st.error(f"Erreur d'analyse : {e}")
 
