@@ -2,3 +2,4 @@ streamlit
 google-genai
 firebase-admin
 groq
+python-docx
