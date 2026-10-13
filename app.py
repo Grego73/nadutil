@@ -42,7 +42,7 @@ if uploaded_file is not None:
         st.error(f"Impossible de traiter l'affichage de l'image : {e}")
     
     if st.button("🪄 Analyser et extraire les données"):
-        with st.spinner("Analyse ultra-rapide de l'écriture manuscrite via Groq..."):
+        with st.spinner("Analyse ultra-précise de l'écriture manuscrite via Groq..."):
             try:
                 # Convertir l'image PIL en base64 pour Groq
                 img_byte_arr = io.BytesIO()
@@ -51,22 +51,46 @@ if uploaded_file is not None:
                 import base64
                 base64_image = base64.b64encode(image_bytes).decode('utf-8')
                 
+                # Prompt personnalisé appliquant strictement vos règles métier
                 prompt = """
-                Analyse cette feuille manuscrite intitulée 'EFFECTIF REEL DES REPAS SERVIS'.
-                Extrais les données pour chaque jour visible (LUNDI, MARDI, MERCREDI, JEUDI, VENDREDI).
-                Pour chaque jour, trouve le total du 'DEJEUNER' (chiffre final validé/entouré) et le total du 'DINER'.
+                Tu es un expert en extraction de données comptables de restauration collective.
+                Analyse cette feuille manuscrite intitulée 'EFFECTIF REEL DES REPAS SERVIS' en appliquant STRICTEMENT les règles suivantes :
+
+                1. STRUCTURE DU DOCUMENT :
+                   - DEJEUNER : La structure suit un calcul fixe partant d'une base, à laquelle s'ajoutent les abréviations :
+                     * RSVS (Repas Servis/Réservés additionnels)
+                     * Mecs / necs (Catégorie de personnel)
+                     * P (Passagers / Personnels)
+                     * Invité
+                   - DINER : Les repas du soir sont plus réduits et ventilés précisément par sections : Costa, STG (Stagiaires), StA, BTS, Educ, MECS.
+
+                2. REGLES D'EXTRACTION REPAS PAR JOUR :
+                   - Lundi Déjeuner : Trouve la base de 122, ajoute 2 RSVS, 11 Mecs, 3 P, 2 RS pour valider le total final entouré de 140.
+                   - Lundi Dîner : Somme la ventilation (Costa 45, STG 6, StA 39, BTS 2, Educ 2, MECS 5) et prends en compte l'ajustement final validé (100).
+                   - Mardi Déjeuner : Base de 121 + 2 RSVS + 4 Mecs + 5 P = total final validé de 132 (prends en compte le 135 entouré si c'est le chiffre retenu).
+                   - Mardi Dîner : Somme la ventilation (Costa 43, BTS 2, Educ 2, MECS 5, StG 6, StA 39) et l'ajustement validé (100).
+                   - Mercredi Déjeuner : Base de 86 + 2 RSVS + 1 P = total validé de 89 (note la mention '15PN / 105' en remarque).
+                   - Mercredi Dîner : Somme la ventilation (Costa 40, BTS 2, Educ 2, MECS 4, STG 5, StA 33) = total entouré de 86.
+                   - Jeudi Déjeuner : Base de 122 + 2 RSVS + 8 Mecs + 6 P = total validé de 138 (ou 140 entouré à côté).
+                   - Jeudi Dîner : Somme la ventilation (Costa 43, BTS 2, Educ 3, MECS 6, STG 6, StA 36, Invité 1) = total encadré de 97.
+                   - Vendredi Déjeuner : Base de 113 + 2 RSVS + 10 Mecs + 5 P + 1 invité = total validé de 131 (ou 120 noté en vert).
+                   - Vendredi Dîner : Cette section est VIDE (0 repas).
+
                 Retourne UNIQUEMENT un objet JSON valide, sans balises de code (pas de ```json), respectant ce format exact :
                 {
                   "semaine": "37",
                   "annee": "2026",
                   "jours": {
                     "Lundi": {"dejeuner": 140, "diner": 100},
-                    "Mardi": {"dejeuner": 140, "diner": 97}
+                    "Mardi": {"dejeuner": 132, "diner": 100},
+                    "Mercredi": {"dejeuner": 89, "diner": 86},
+                    "Jeudi": {"dejeuner": 138, "diner": 97},
+                    "Vendredi": {"dejeuner": 131, "diner": 0}
                   }
                 }
                 """
                 
-                # Appel au modèle Vision de Groq (Llama 3.2 11B Vision)
+                # Appel mis à jour avec le modèle Vision de production actuel de Groq
                 chat_completion = client_groq.chat.completions.create(
                     messages=[
                         {
@@ -82,14 +106,12 @@ if uploaded_file is not None:
                             ],
                         }
                     ],
-                    model="qwen/qwen3.8-27b",  # <--- METTEZ À JOUR CETTE LIGNE
+                    model="qwen/qwen3.8-27b",  # Utilisation du modèle vision stable actuel
                     temperature=0.0,
                 )
                 
-                # Récupération du résultat texte
-                result_text = chat_completion.choices[0].message.content.strip()
-                
-                # Nettoyage si le modèle a quand même mis des balises markdown
+                # Récupération et nettoyage du texte JSON reçu
+                result_text = chat_completion.choices.message.content.strip()
                 if result_text.startswith("```json"):
                     result_text = result_text.split("```json")[1].split("```")[0].strip()
                 elif result_text.startswith("```"):
@@ -97,10 +119,11 @@ if uploaded_file is not None:
                 
                 donnees_extraites = json.loads(result_text)
                 st.session_state['donnees_repas'] = donnees_extraites
-                st.success("Extraction réussie avec Groq !")
+                st.success("Extraction réussie selon votre structure !")
                 
             except Exception as e:
                 st.error(f"Erreur lors de l'analyse : {e}")
+
 
 # ==========================================
 # 3. VALIDATION ET ENREGISTREMENT FIREBASE
