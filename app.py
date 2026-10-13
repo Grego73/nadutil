@@ -2,7 +2,6 @@ import streamlit as st
 from google import genai
 import firebase_admin
 from firebase_admin import credentials, firestore
-import json
 
 # ==========================================
 # 1. CONFIGURATION DES APIS & CONFIG
@@ -12,13 +11,24 @@ import json
 GOOGLE_API_KEY = st.secrets["GOOGLE_API_KEY"]
 client = genai.Client(api_key=GOOGLE_API_KEY)
 
-# Initialisation Firebase reconstruite dynamiquement
+# Initialisation Firebase robuste
 if not firebase_admin._apps:
+    # Nettoyage et forçage de la clé privée pour gérer les sauts de ligne réels
+    raw_key = st.secrets["FIREBASE_PRIVATE_KEY"].strip()
+    if "\\n" in raw_key:
+        clean_key = raw_key.replace("\\n", "\n")
+    else:
+        clean_key = "\n".join([line.strip() for line in raw_key.split("\n") if line.strip()])
+
+    # Reconstruction automatique de l'adresse e-mail technique officielle Firebase
+    project_id = st.secrets["FIREBASE_PROJECT_ID"].strip()
+    official_email = f"firebase-adminsdk-fbsvc@{project_id}.iam.gserviceaccount.com"
+
     firebase_creds = {
         "type": "service_account",
-        "project_id": st.secrets["FIREBASE_PROJECT_ID"],
-        "private_key": st.secrets["FIREBASE_PRIVATE_KEY"],
-        "client_email": st.secrets["FIREBASE_CLIENT_EMAIL"]
+        "project_id": project_id,
+        "private_key": clean_key,
+        "client_email": official_email
     }
     
     cred = credentials.Certificate(firebase_creds)
@@ -26,9 +36,6 @@ if not firebase_admin._apps:
 
 db = firestore.client()
 
-# ==========================================
-# LE RESTE DU CODE (INTERFACE & BOUTONS) RESTE LE MÊME...
-# ==========================================
 
 
 # ==========================================
