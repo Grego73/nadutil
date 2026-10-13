@@ -218,3 +218,4 @@ if st.button("📄 GÉNÉRER LE DOCUMENT WORD COMPLET (.DOCX)"):
         data=doc_io,
         file_name=f"Facturation_Detaillee_Semaine_{num_semaine}.docx",
         mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    )
