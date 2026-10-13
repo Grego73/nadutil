@@ -3,8 +3,7 @@ import pandas as pd
 import firebase_admin
 from firebase_admin import credentials, firestore
 from PIL import Image
-import easyocr
-import numpy as np
+import pytesseract
 import io
 
 # 1. CONFIGURATION DE L'INTERFACE
@@ -20,7 +19,7 @@ if not firebase_admin._apps:
         firebase_admin.initialize_app(cred)
         st.sidebar.success("🟢 Base de données Firebase connectée !")
     except Exception:
-        st.sidebar.warning("🟡 Mode local actif (Firebase non configuré).")
+        st.sidebar.warning("橫 Mode local actif (Firebase non configuré).")
 
 db = firestore.client() if firebase_admin._apps else None
 
@@ -40,20 +39,21 @@ if fichier_image is not None:
     
     with st.spinner("🧠 Lecture de l'image par l'IA en cours... Veuillez patienter..."):
         try:
-            # Initialisation du lecteur OCR en Français
-            reader = easyocr.Reader(['fr'])
-            image_np = np.array(image)
-            resultat_ocr = reader.readtext(image_np, detail=0)
-            
-            # Reconstruction du texte brut ligne par ligne
-            texte_analyse = "\n".join(resultat_ocr)
-            st.success("📝 Lecture de l'image terminée ! Texte extrait avec succès.")
+            # Extraction du texte via Tesseract OCR (intégré nativement sur Streamlit Cloud)
+            texte_analyse = pytesseract.image_to_string(image, lang='fra')
+            if texte_analyse.strip():
+                st.success("📝 Lecture de l'image terminée ! Texte extrait avec succès.")
+            else:
+                st.error("🔴 L'image a été lue mais aucun texte n'a pu être extrait. Assurez-vous que l'image est bien nette.")
         except Exception as e:
             st.error(f"🔴 Erreur lors de la lecture de l'image : {e}")
 
 # 4. ALGORITHME D'ANALYSE ET GENERATION EXCEL
 if texte_analyse:
     st.write("### ⚙️ 2. Traitement des effectifs de la restauration")
+    
+    # Petite zone de texte optionnelle pour permettre à l'utilisateur de corriger le texte lu si besoin
+    texte_analyse = st.text_area("Texte extrait (Vous pouvez le corriger manuellement si l'IA a fait une faute) :", value=texte_analyse, height=200)
     
     if st.button("📊 CALCULER LES EFFECTIFS ET CRÉER LE FICHIER EXCEL"):
         lignes = texte_analyse.split("\n")
@@ -138,4 +138,4 @@ if texte_analyse:
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
         else:
-            st.warning("⚠️ Le texte extrait de l'image ne contient pas de lignes au format attendu (NOM, PRENOM, REGIME).")
+            st.warning("⚠️ Le texte extrait de l'image ne contient pas de lignes au format attendu (NOM, PRENOM, REGIME). Vous pouvez ajuster le texte ci-dessus pour correspondre à ce format (séparé par des virgules).")
