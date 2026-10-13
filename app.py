@@ -1,5 +1,5 @@
 import streamlit as st
-import google.generativeai as genai
+from google import genai  # Nouvelle méthode d'importation officielle de Google
 import firebase_admin
 from firebase_admin import credentials, firestore
 import json
@@ -8,11 +8,9 @@ import json
 # 1. CONFIGURATION DES APIS & CONFIG
 # ==========================================
 
-# Configuration Gemini (Vous devez mettre votre clé dans les "Secrets" de Streamlit)
-# Le modèle "gemini-1.5-flash" est excellent pour extraire du texte d'une image
+# Configuration Gemini avec la nouvelle bibliothèque officielle
 GOOGLE_API_KEY = st.secrets["GOOGLE_API_KEY"]
-genai.configure(api_key=GOOGLE_API_KEY)
-model = genai.GenerativeModel('gemini-1.5-flash')
+client = genai.Client(api_key=GOOGLE_API_KEY)
 
 # Initialisation Firebase (Évite les double-initialisations sur Streamlit)
 if not firebase_admin._apps:
@@ -42,7 +40,6 @@ if uploaded_file is not None:
             try:
                 # Lire l'image pour Gemini
                 image_bytes = uploaded_file.read()
-                image_parts = [{"mime_type": uploaded_file.type, "data": image_bytes}]
                 
                 # Prompt ultra-précis pour forcer l'IA à répondre en JSON pur
                 prompt = """
@@ -60,8 +57,14 @@ if uploaded_file is not None:
                 }
                 """
                 
-                # Appel à l'IA
-                response = model.generate_content([prompt, image_parts[0]])
+                # Appel à l'IA avec la nouvelle syntaxe officielle et le modèle à jour
+                response = client.models.generate_content(
+                    model="gemini-2.5-flash",
+                    contents=[
+                        prompt,
+                        {"mime_type": uploaded_file.type, "data": image_bytes}
+                    ]
+                )
                 
                 # Convertir la réponse texte en dictionnaire Python
                 donnees_extraites = json.loads(response.text.strip())
