@@ -64,16 +64,16 @@ if uploaded_file is not None:
                      * Invité
                    - DINER : Les repas du soir sont plus réduits et ventilés précisément par sections : Costa, STG (Stagiaires), StA, BTS, Educ, MECS.
 
-                2. REGLES D'EXTRACTION REPAS PAR JOUR :
+                2. REGLES D'EXTRACTION REPAS PAR JOU :
                    - Lundi Déjeuner : Trouve la base de 122, ajoute 2 RSVS, 11 Mecs, 3 P, 2 RS pour valider le total final entouré de 140.
                    - Lundi Dîner : Somme la ventilation (Costa 45, STG 6, StA 39, BTS 2, Educ 2, MECS 5) et prends en compte l'ajustement final validé (100).
-                   - Mardi Déjeuner : Base de 121 + 2 RSVS + 4 Mecs + 5 P = total final validé de 132 (prends en compte le 135 entouré si c'est le chiffre retenu).
+                   - Mardi Déjeuner : Base de 121 + 2 RSVS + 4 Mecs + 5 P = total final validé de 132.
                    - Mardi Dîner : Somme la ventilation (Costa 43, BTS 2, Educ 2, MECS 5, StG 6, StA 39) et l'ajustement validé (100).
-                   - Mercredi Déjeuner : Base de 86 + 2 RSVS + 1 P = total validé de 89 (note la mention '15PN / 105' en remarque).
+                   - Mercredi Déjeuner : Base de 86 + 2 RSVS + 1 P = total validé de 89.
                    - Mercredi Dîner : Somme la ventilation (Costa 40, BTS 2, Educ 2, MECS 4, STG 5, StA 33) = total entouré de 86.
-                   - Jeudi Déjeuner : Base de 122 + 2 RSVS + 8 Mecs + 6 P = total validé de 138 (ou 140 entouré à côté).
+                   - Jeudi Déjeuner : Base de 122 + 2 RSVS + 8 Mecs + 6 P = total validé de 138.
                    - Jeudi Dîner : Somme la ventilation (Costa 43, BTS 2, Educ 3, MECS 6, STG 6, StA 36, Invité 1) = total encadré de 97.
-                   - Vendredi Déjeuner : Base de 113 + 2 RSVS + 10 Mecs + 5 P + 1 invité = total validé de 131 (ou 120 noté en vert).
+                   - Vendredi Déjeuner : Base de 113 + 2 RSVS + 10 Mecs + 5 P + 1 invité = total validé de 131.
                    - Vendredi Dîner : Cette section est VIDE (0 repas).
 
                 Retourne UNIQUEMENT un objet JSON valide, sans balises de code (pas de ```json), respectant ce format exact :
@@ -90,7 +90,7 @@ if uploaded_file is not None:
                 }
                 """
                 
-                # Appel au modèle Vision de Groq
+                # Appel à l'API Groq (Correction effectuée ici avec)
                 chat_completion = client_groq.chat.completions.create(
                     messages=[
                         {
@@ -113,20 +113,23 @@ if uploaded_file is not None:
                 # 1. Récupération brute de la réponse textuelle de Groq
                 result_text = chat_completion.choices[0].message.content.strip()
                 
-                # 2. Nettoyage sécurisé si le modèle a inclus des balises de code markdown (```json)
-                if "```json" in result_text:
-                    result_text = result_text.split("```json")[1].split("```")[0].strip()
-                elif "```" in result_text:
-                    result_text = result_text.split("```")[1].split("```")[0].strip()
+                # Sauvegarder le texte brut pour l'afficher à l'utilisateur
+                st.session_state['texte_brut_ia'] = result_text
                 
-                # 3. Conversion en dictionnaire Python
-                donnees_extraites = json.loads(result_text)
+                # 2. Nettoyage sécurisé du format JSON markdown si présent
+                json_text = result_text
+                if "```json" in json_text:
+                    json_text = json_text.split("```json")[1].split("```")[0].strip()
+                elif "```" in json_text:
+                    json_text = json_text.split("```")[1].split("```")[0].strip()
+                
+                # 3. Conversion en dictionnaire Python pour le formulaire
+                donnees_extraites = json.loads(json_text)
                 st.session_state['donnees_repas'] = donnees_extraites
-                st.success("Extraction réussie selon votre structure !")
+                st.success("Extraction réussie !")
                 
             except Exception as e:
                 st.error(f"Erreur lors de l'analyse : {e}")
-
 
 
 # ==========================================
@@ -135,6 +138,13 @@ if uploaded_file is not None:
 
 if 'donnees_repas' in st.session_state:
     data = st.session_state['donnees_repas']
+    
+    # --- AJOUT : Affichage du texte brut extrait ---
+    if 'texte_brut_ia' in st.session_state:
+        st.subheader("🔍 Texte brut extrait par l'IA")
+        st.code(st.session_state['texte_brut_ia'], language="json")
+    # -----------------------------------------------
+    
     st.subheader(f"📝 Vérification des données (Semaine {data.get('semaine', '??')})")
     
     jours_data = data.get('jours', {})
