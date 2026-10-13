@@ -54,8 +54,8 @@ def generer_fichier_word(semaine, date_facturation, donnees_jours):
     table = doc.add_table(rows=1, cols=3)
     table.style = 'Table Grid'
     
-    # Titres des colonnes correspondants aux deux repas principaux de votre document
-    hdr_cells = table.rows.cells
+    # CORRECTION ICI : On cible la première ligne avec [0]
+    hdr_cells = table.rows[0].cells
     hdr_cells[0].text = 'JOUR'
     hdr_cells[1].text = 'MIDI'
     hdr_cells[2].text = 'SOIR'
