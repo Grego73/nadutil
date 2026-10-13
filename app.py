@@ -172,7 +172,7 @@ if texte_extrait.strip():
         thin_border = Border(left=Side(style='thin', color='A6A6A6'), right=Side(style='thin', color='A6A6A6'), top=Side(style='thin', color='A6A6A6'), bottom=Side(style='thin', color='A6A6A6'))
         
         # Style des en-têtes
-        for r in:
+        for r in [4, 5]:
             for c in range(1, 15):
                 cell = ws.cell(row=r, column=c)
                 cell.fill = fill_header
