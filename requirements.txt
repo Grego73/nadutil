@@ -2,5 +2,5 @@ streamlit
 firebase-admin
 pandas
 openpyxl
-easyocr
+pytesseract
 Pillow
