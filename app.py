@@ -90,7 +90,7 @@ if uploaded_file is not None:
                 }
                 """
                 
-                # Appel mis à jour avec le modèle Vision de production actuel de Groq
+                # Appel au modèle Vision de Groq
                 chat_completion = client_groq.chat.completions.create(
                     messages=[
                         {
@@ -106,23 +106,27 @@ if uploaded_file is not None:
                             ],
                         }
                     ],
-                    model="qwen/qwen3.8-27b",  # Utilisation du modèle vision stable actuel
+                    model="qwen/qwen3.8-27b",
                     temperature=0.0,
                 )
                 
-                # Récupération et nettoyage du texte JSON reçu
+                # RÉCUPÉRATION ET NETTOYAGE SÉCURISÉ DU JSON
                 result_text = chat_completion.choices.message.content.strip()
-                if result_text.startswith("```json"):
+                
+                # Technique robuste pour extraire uniquement ce qui se trouve entre les balises ```json
+                if "```json" in result_text:
                     result_text = result_text.split("```json")[1].split("```")[0].strip()
-                elif result_text.startswith("```"):
+                elif "```" in result_text:
                     result_text = result_text.split("```")[1].split("```")[0].strip()
                 
+                # Conversion en dictionnaire Python
                 donnees_extraites = json.loads(result_text)
                 st.session_state['donnees_repas'] = donnees_extraites
                 st.success("Extraction réussie selon votre structure !")
                 
             except Exception as e:
                 st.error(f"Erreur lors de l'analyse : {e}")
+
 
 
 # ==========================================
