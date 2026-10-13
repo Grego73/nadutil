@@ -37,16 +37,28 @@ st.write("Prenez en photo ou téléversez la feuille de la semaine.")
 uploaded_file = st.file_uploader("Choisir une image...", type=["jpg", "jpeg", "png"])
 
 if uploaded_file is not None:
-    # Afficher l'image importée
-    st.image(uploaded_file, caption="Feuille importée", use_column_width=True)
+    try:
+        # 1. Ouvrir l'image avec PIL
+        image = Image.open(uploaded_file)
+        
+        # 2. Corriger automatiquement l'orientation (Exif) si elle est sur le côté
+        image = ImageOps.exif_transpose(image)
+        
+        # Afficher l'image remise à l'endroit sur l'interface
+        st.image(image, caption="Feuille importée (remise à l'endroit)", use_column_width=True)
+        
+    except Exception as e:
+        st.error(f"Impossible de traiter l'affichage de l'image : {e}")
     
     if st.button("🪄 Analyser et extraire les données"):
         with st.spinner("Analyse de l'écriture manuscrite en cours..."):
             try:
-                # Lire l'image pour Gemini
-                image_bytes = uploaded_file.read()
+                # Convertir l'image PIL corrigée en octets pour l'envoyer à Gemini
+                img_byte_arr = io.BytesIO()
+                image.save(img_byte_arr, format='PNG')
+                image_bytes = img_byte_arr.getvalue()
                 
-                # Prompt ultra-précis pour forcer l'IA à répondre en JSON pur
+                # Prompt de traitement pour l'IA
                 prompt = """
                 Analyse cette feuille manuscrite intitulée 'EFFECTIF REEL DES REPAS SERVIS'.
                 Extrais les données pour chaque jour visible (LUNDI, MARDI, MERCREDI, JEUDI, VENDREDI).
@@ -62,19 +74,17 @@ if uploaded_file is not None:
                 }
                 """
                 
-                # Appel à l'IA avec la nouvelle syntaxe officielle et le modèle à jour
+                # Appel à l'IA avec l'image redressée
                 response = client.models.generate_content(
                     model="gemini-2.5-flash",
                     contents=[
                         prompt,
-                        {"mime_type": uploaded_file.type, "data": image_bytes}
+                        {"mime_type": "image/png", "data": image_bytes}
                     ]
                 )
                 
                 # Convertir la réponse texte en dictionnaire Python
                 donnees_extraites = json.loads(response.text.strip())
-                
-                # Stocker le résultat dans la session Streamlit pour l'étape suivante
                 st.session_state['donnees_repas'] = donnees_extraites
                 st.success("Extraction réussie !")
                 
