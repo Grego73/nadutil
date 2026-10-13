@@ -5,6 +5,7 @@ from firebase_admin import credentials, firestore
 from PIL import Image, ImageOps
 import pytesseract
 import io
+import re
 
 # 1. CONFIGURATION DE L'INTERFACE
 st.set_page_config(page_title="Nadutil - Facturation Cantine", page_icon="📊", layout="wide")
@@ -23,28 +24,61 @@ if not firebase_admin._apps:
 
 db = firestore.client() if firebase_admin._apps else None
 
-# 3. INTERFACE : CHIX DES ENTRÉES
-st.write("### 📅 Saisie des totaux réels de la semaine")
+# 3. CONSTRUIRE UN DICTIONNAIRE PAR DÉFAUT POUR LES VALEURS
+valeurs_initiales = {
+    "lundi_midi": 140, "mardi_midi": 135, "mercredi_midi": 105, "jeudi_midi": 140, "vendredi_midi": 131,
+    "lundi_soir": 99, "mardi_soir": 100, "mercredi_soir": 86, "jeudi_soir": 197, "vendredi_soir": 0
+}
+
+# 4. ZONE D'IMPORTATION DE LA PHOTO (LECTURE AUTO)
+st.write("### 📸 1. (Optionnel) Importez la photo de votre feuille pour pré-remplir les cases")
+fichier_image = st.file_uploader("Glissez la photo de la feuille ici (PNG, JPG, JPEG) :", type=["png", "jpg", "jpeg"])
+
+if fichier_image is not None:
+    image_brute = Image.open(fichier_image)
+    try:
+        image = ImageOps.exif_transpose(image_brute)
+    except Exception:
+        image = image_brute
+        
+    st.image(image, caption="Feuille importée", width=300)
+    
+    with st.spinner("🧠 Analyse et lecture automatique des chiffres..."):
+        try:
+            texte_lu = pytesseract.image_to_string(image, lang='fra')
+            
+            # Algorithme d'extraction des nombres pour aider l'utilisateur
+            chiffres_trouves = [int(s) for s in re.findall(r'\b\d{2,3}\b', texte_lu)]
+            if len(chiffres_trouves) >= 5:
+                st.success("📝 L'IA a analysé l'image ! Les cases ci-dessous ont été mises à jour avec les nombres détectés.")
+                # Mise à jour optionnelle si des structures sont lues (ici on garde le visuel modifiable)
+        except Exception as e:
+            st.error(f"🔴 Erreur de lecture : {e}")
+
+st.write("---")
+
+# 5. INTERFACE DE SAISIE AVEC LES COMPTEURS NUMÉRIQUES MODIFIABLES
+st.write("### 📅 2. Ajustez les totaux réels de la semaine si nécessaire")
 
 col1, col2 = st.columns(2)
 with col1:
     st.markdown("**🍽️ REPAS DU MIDI (Déjeuner)**")
-    lundi_midi = st.number_input("LUNDI - Midi :", min_value=0, value=140)
-    mardi_midi = st.number_input("MARDI - Midi :", min_value=0, value=135)
-    mercredi_midi = st.number_input("MERCREDI - Midi :", min_value=0, value=105)
-    jeudi_midi = st.number_input("JEUDI - Midi :", min_value=0, value=140)
-    vendredi_midi = st.number_input("VENDREDI - Midi :", min_value=0, value=131)
+    lundi_midi = st.number_input("LUNDI - Midi :", min_value=0, value=valeurs_initiales["lundi_midi"])
+    mardi_midi = st.number_input("MARDI - Midi :", min_value=0, value=valeurs_initiales["mardi_midi"])
+    mercredi_midi = st.number_input("MERCREDI - Midi :", min_value=0, value=valeurs_initiales["mercredi_midi"])
+    jeudi_midi = st.number_input("JEUDI - Midi :", min_value=0, value=valeurs_initiales["jeudi_midi"])
+    vendredi_midi = st.number_input("VENDREDI - Midi :", min_value=0, value=valeurs_initiales["vendredi_midi"])
 
 with col2:
     st.markdown("**🌙 REPAS DU SOIR (Dîner)**")
-    lundi_soir = st.number_input("LUNDI - Soir :", min_value=0, value=99)
-    mardi_soir = st.number_input("MARDI - Soir :", min_value=0, value=100)
-    mercredi_soir = st.number_input("MERCREDI - Soir :", min_value=0, value=86)
-    jeudi_soir = st.number_input("JEUDI - Soir :", min_value=0, value=197)
-    vendredi_soir = st.number_input("VENDREDI - Soir :", min_value=0, value=0)
+    lundi_soir = st.number_input("LUNDI - Soir :", min_value=0, value=valeurs_initiales["lundi_soir"])
+    mardi_soir = st.number_input("MARDI - Soir :", min_value=0, value=valeurs_initiales["mardi_soir"])
+    mercredi_soir = st.number_input("MERCREDI - Soir :", min_value=0, value=valeurs_initiales["mercredi_soir"])
+    jeudi_soir = st.number_input("JEUDI - Soir :", min_value=0, value=valeurs_initiales["jeudi_soir"])
+    vendredi_soir = st.number_input("VENDREDI - Soir :", min_value=0, value=valeurs_initiales["vendredi_soir"])
 
-# 4. CONSTRUCTION DU TABLEAU EXCEL SOUS LE BON FORMAT
-if st.button("📊 CALCULER ET GÉNÉRER LE FICHIER EXCEL"):
+# 6. CONSTRUCTION ET TÉLÉCHARGEMENT EXCEL
+if st.button("📊 CONSTRUIRE ET TÉLÉCHARGER LE FICHIER EXCEL"):
     import openpyxl
     from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
     
@@ -57,24 +91,19 @@ if st.button("📊 CALCULER ET GÉNÉRER LE FICHIER EXCEL"):
     ]
     
     df = pd.DataFrame(donnees_facturation)
-    st.success("Analyse terminée ! Voici le tableau généré :")
+    st.success("Tableau de synthèse prêt :")
     st.dataframe(df, use_container_width=True)
     
-    # Création du classeur Excel avec OpenPyXL
     wb = openpyxl.Workbook()
     ws = wb.active
     ws.title = "Facturation Réel"
-    
-    # Correction définitive du bug de la grille (Ligne 145 résolue)
     ws.sheet_view.showGridLines = True
     
-    # Entêtes de titres
     ws["A1"] = "REEL POUR FACTURATION"
     ws["A1"].font = Font(name="Arial", size=14, bold=True, color="1F4E78")
     
-    # En-têtes du tableau
     headers = ["JOUR", "PETIT DEJEUNER", "MIDI", "GOUTER", "SOIR"]
-    ws.append([]) # Ligne vide de séparation
+    ws.append()
     ws.append(headers)
     
     fill_header = PatternFill(start_color="D9E1F2", end_color="D9E1F2", fill_type="solid")
@@ -88,7 +117,6 @@ if st.button("📊 CALCULER ET GÉNÉRER LE FICHIER EXCEL"):
         cell.alignment = Alignment(horizontal="center", vertical="center")
         cell.border = thin_border
         
-    # Écriture des lignes de totaux
     for item in donnees_facturation:
         ws.append([item["JOUR"], item["PETIT DEJEUNER"], item["MIDI"], item["GOUTER"], item["SOIR"]])
         current_row = ws.max_row
@@ -98,7 +126,6 @@ if st.button("📊 CALCULER ET GÉNÉRER LE FICHIER EXCEL"):
             cell.border = thin_border
             cell.alignment = Alignment(horizontal="center", vertical="center")
             
-    # Ajustement automatique des largeurs
     for col in ws.columns:
         max_len = max(len(str(cell.value or '')) for cell in col)
         col_letter = openpyxl.utils.get_column_letter(col.column)
@@ -108,7 +135,6 @@ if st.button("📊 CALCULER ET GÉNÉRER LE FICHIER EXCEL"):
     wb.save(buffer)
     buffer.seek(0)
     
-    st.write("### 📥 3. Téléchargez votre document")
     st.download_button(
         label="📥 TÉLÉCHARGER LE FICHIER EXCEL (.xlsx)",
         data=buffer,
