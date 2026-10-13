@@ -1,34 +1,28 @@
 import streamlit as st
-from google import genai
 import firebase_admin
 from firebase_admin import credentials, firestore
-from PIL import Image, ImageOps  # <--- IL FAUT RAJOUTER CETTE LIGNE ICI !
+from PIL import Image, ImageOps
 import io
 import json
-
+from groq import Groq  # Importation du client Groq
 
 # ==========================================
 # 1. CONFIGURATION DES APIS & CONFIG
 # ==========================================
 
-# Configuration Gemini
-GOOGLE_API_KEY = st.secrets["GOOGLE_API_KEY"]
-client = genai.Client(api_key=GOOGLE_API_KEY)
+# Initialisation du client Groq (Fini les coupures Google !)
+GROQ_API_KEY = st.secrets["GROQ_API_KEY"]
+client_groq = Groq(api_key=GROQ_API_KEY)
 
-# Initialisation Firebase en copiant la configuration du calculateur
+# Initialisation Firebase en copiant la configuration de votre calculateur
 if not firebase_admin._apps:
-    # Récupérer directement le dictionnaire généré par Streamlit sous [text_key]
     firebase_creds = dict(st.secrets["text_key"])
-    
-    # Correction automatique des sauts de ligne de la clé privée si nécessaire
     if "private_key" in firebase_creds:
         firebase_creds["private_key"] = firebase_creds["private_key"].replace("\\n", "\n")
-        
     cred = credentials.Certificate(firebase_creds)
     firebase_admin.initialize_app(cred)
 
 db = firestore.client()
-
 
 # ==========================================
 # 2. INTERFACE UTILISATEUR (STREAMLIT)
@@ -37,27 +31,26 @@ db = firestore.client()
 st.title("📊 Numérisation des Repas Servis")
 st.write("Prenez en photo ou téléversez la feuille de la semaine.")
 
-# Option pour charger l'image
 uploaded_file = st.file_uploader("Choisir une image...", type=["jpg", "jpeg", "png"])
 
 if uploaded_file is not None:
     try:
-        # 1. Ouvrir l'image avec PIL
         image = Image.open(uploaded_file)
-        
-        # 2. Corriger automatiquement l'orientation (Exif) si elle est sur le côté
         image = ImageOps.exif_transpose(image)
-        
-        # Afficher l'image remise à l'endroit sur l'interface
         st.image(image, caption="Feuille importée (remise à l'endroit)", use_column_width=True)
-        
     except Exception as e:
         st.error(f"Impossible de traiter l'affichage de l'image : {e}")
     
     if st.button("🪄 Analyser et extraire les données"):
-        with st.spinner("Analyse de l'écriture manuscrite en cours..."):
+        with st.spinner("Analyse ultra-rapide de l'écriture manuscrite via Groq..."):
             try:
-                # Prompt de traitement pour l'IA
+                # Convertir l'image PIL en base64 pour Groq
+                img_byte_arr = io.BytesIO()
+                image.save(img_byte_arr, format='JPEG')
+                image_bytes = img_byte_arr.getvalue()
+                import base64
+                base64_image = base64.b64encode(image_bytes).decode('utf-8')
+                
                 prompt = """
                 Analyse cette feuille manuscrite intitulée 'EFFECTIF REEL DES REPAS SERVIS'.
                 Extrais les données pour chaque jour visible (LUNDI, MARDI, MERCREDI, JEUDI, VENDREDI).
@@ -73,31 +66,41 @@ if uploaded_file is not None:
                 }
                 """
                 
-                import time
+                # Appel au modèle Vision de Groq (Llama 3.2 11B Vision)
+                chat_completion = client_groq.chat.completions.create(
+                    messages=[
+                        {
+                            "role": "user",
+                            "content": [
+                                {"type": "text", "text": prompt},
+                                {
+                                    "type": "image_url",
+                                    "image_url": {
+                                        "url": f"data:image/jpeg;base64,{base64_image}",
+                                    },
+                                },
+                            ],
+                        }
+                    ],
+                    model="llama-3.2-11b-vision-preview",
+                    temperature=0.0,  # Strict pour les chiffres
+                )
                 
-                # Tentative d'appel avec boucle de sécurité si le serveur est surchargé (Erreur 503)
-                for tentative in range(3):
-                    try:
-                        response = client.models.generate_content(
-                            model="gemini-3.8-flash",  # Le seul modèle officiel disponible
-                            contents=[prompt, image]
-                        )
-                        break  # Si ça réussit, on sort de la boucle
-                    except Exception as e:
-                        if "503" in str(e) and tentative < 2:
-                            time.sleep(2)  # On attend 2 secondes avant de réessayer
-                            continue
-                        raise e  # Si c'est une autre erreur ou la dernière tentative, on bloque
+                # Récupération du résultat texte
+                result_text = chat_completion.choices[0].message.content.strip()
                 
-                # Convertir la réponse texte en dictionnaire Python
-                donnees_extraites = json.loads(response.text.strip())
+                # Nettoyage si le modèle a quand même mis des balises markdown
+                if result_text.startswith("```json"):
+                    result_text = result_text.split("```json")[1].split("```")[0].strip()
+                elif result_text.startswith("```"):
+                    result_text = result_text.split("```")[1].split("```")[0].strip()
+                
+                donnees_extraites = json.loads(result_text)
                 st.session_state['donnees_repas'] = donnees_extraites
-                st.success("Extraction réussie !")
+                st.success("Extraction réussie avec Groq !")
                 
             except Exception as e:
                 st.error(f"Erreur lors de l'analyse : {e}")
-
-
 
 # ==========================================
 # 3. VALIDATION ET ENREGISTREMENT FIREBASE
@@ -105,12 +108,13 @@ if uploaded_file is not None:
 
 if 'donnees_repas' in st.session_state:
     data = st.session_state['donnees_repas']
+    st.subheader(f"📝 Vérification des données (Semaine {data.get('semaine', '??')})")
     
-    st.subheader(f"📝 Vérification des données (Semaine {data['semaine']})")
-    
-    # Formulaire dynamique pour modifier les chiffres si l'IA s'est trompée
+    jours_data = data.get('jours', {})
     valeurs_finales = {}
-    for jour, repas in data['jours'].items():
+    
+    for jour in ["Lundi", "Mardi", "Mercredi", "Jeudi", "Vendredi"]:
+        repas = jours_data.get(jour, jours_data.get(jour.lower(), {}))
         st.markdown(f"**{jour}**")
         col1, col2 = st.columns(2)
         with col1:
@@ -119,23 +123,19 @@ if 'donnees_repas' in st.session_state:
             din = col2.number_input(f"Dîner - {jour}", value=int(repas.get('diner', 0)), key=f"din_{jour}")
         valeurs_finales[jour.lower()] = {"dejeuner": dej, "diner": din}
 
-    # Bouton de sauvegarde vers Firebase
     if st.button("💾 Enregistrer dans Firebase"):
         try:
-            doc_id = f"semaine_{data['semaine']}_{data['annee']}"
+            doc_id = f"semaine_{data.get('semaine', '37')}_{data.get('annee', '2026')}"
             doc_ref = db.collection("repas_servis").document(doc_id)
             
-            # Envoi des données nettoyées
             doc_ref.set({
-                "numero_semaine": int(data['semaine']),
-                "annee": int(data['annee']),
+                "numero_semaine": int(data.get('semaine', 37)),
+                "annee": int(data.get('annee', 2026)),
                 "donnees": valeurs_finales
             })
-            
             st.balloons()
             st.success(f"Données enregistrées avec succès dans Firestore ! (ID: {doc_id})")
-            # Nettoyer la session après enregistrement
             del st.session_state['donnees_repas']
-            
+            st.rerun()
         except Exception as e:
             st.error(f"Erreur d'enregistrement Firebase : {e}")
