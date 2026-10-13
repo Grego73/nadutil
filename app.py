@@ -7,21 +7,17 @@ from firebase_admin import credentials, firestore
 # 1. CONFIGURATION DES APIS & CONFIG
 # ==========================================
 
-# Configuration Gemini
 GOOGLE_API_KEY = st.secrets["GOOGLE_API_KEY"]
 client = genai.Client(api_key=GOOGLE_API_KEY)
 
-# Initialisation Firebase robuste
+# Initialisation Firebase sécurisée
 if not firebase_admin._apps:
-    # Nettoyage et forçage de la clé privée pour gérer les sauts de ligne réels
-    raw_key = st.secrets["FIREBASE_PRIVATE_KEY"].strip()
-    if "\\n" in raw_key:
-        clean_key = raw_key.replace("\\n", "\n")
-    else:
-        clean_key = "\n".join([line.strip() for line in raw_key.split("\n") if line.strip()])
-
-    # Reconstruction automatique de l'adresse e-mail technique officielle Firebase
     project_id = st.secrets["FIREBASE_PROJECT_ID"].strip()
+    
+    # Restituer les vrais sauts de ligne pour la clé Google
+    clean_key = st.secrets["FIREBASE_PRIVATE_KEY"].strip().replace("\\n", "\n")
+    
+    # Reconstruction de l'adresse e-mail technique officielle Firebase
     official_email = f"firebase-adminsdk-fbsvc@{project_id}.iam.gserviceaccount.com"
 
     firebase_creds = {
@@ -35,7 +31,6 @@ if not firebase_admin._apps:
     firebase_admin.initialize_app(cred)
 
 db = firestore.client()
-
 
 
 # ==========================================
